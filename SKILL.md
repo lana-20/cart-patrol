@@ -255,7 +255,31 @@ vibium find role button --name "Yes" && vibium click @e1   # or "No" to dismiss
 - **Shopify**: server-side session — direct `/cart` URL is safe.
 - **saucedemo.com**: server-side session — direct `/cart.html` URL is safe.
 - **OpenCart (lambdatest)**: server-side session — direct `/cart` URL is safe.
+- **AbanteCart (automationteststore)**: server-side session — direct `/index.php?rt=checkout/cart` safe.
 - **PrestaShop (demo)**: server-side session per ephemeral subdomain — direct `/cart?action=show` is safe within the same subdomain, but subdomains expire in ~2–5 minutes.
+
+### AbanteCart — Add to Cart is an anchor, not a button
+AbanteCart uses `<a class="cart">` for Add to Cart, not `<button>`. `vibium find role button` will miss it:
+```
+vibium find "a.cart" && vibium click @e1
+# On click, page navigates directly to cart (no toast or modal)
+```
+Some products are "Call To Order" type with no `a.cart` — skip them, pick a different product.
+
+### AbanteCart — qty input name contains a hash
+The quantity input name is `quantity[productid:hash]`, not a simple `name="quantity"`. Discover it via eval:
+```
+vibium eval 'JSON.stringify([...document.querySelectorAll("input")].filter(i => i.name.startsWith("quantity")).map(i => ({name: i.name, value: i.value})))'
+# → [{"name":"quantity[53:b1a0e11451071a263d5a530074cc3395]","value":"1"}]
+vibium fill "input[name='quantity[53:b1a0e11451071a263d5a530074cc3395]']" "3"
+vibium find "button[title='Update']" && vibium click @e1 && vibium wait load
+```
+
+### AbanteCart — remove via URL parameter
+Remove link is an `<a>` with `href` containing `remove=productid:hash`:
+```
+vibium find "a[href*='remove=']" && vibium click @e1 && vibium wait load
+```
 
 ### Daemon stability
 On long test runs the vibium daemon can drop. If any command fails with "broken pipe" or "i/o timeout":
@@ -393,3 +417,25 @@ vibium daemon stop && sleep 2 && vibium daemon start && sleep 2
   - Country/state zone reload resets Terms & Conditions checkbox
   - Post-order "Continue" button loops back to the same success URL instead of redirecting home
 - **Test data:** First Name `Test`, Last Name `User`, Email `guest_<timestamp>@example.com`, Tel `12025550100`, Address `123 Test Street`, City `Austin`, Post Code `78701`, Country `223` (US), Zone `3669` (Texas)
+
+---
+
+### automationteststore.com (https://automationteststore.com/)
+
+- **Platform:** AbanteCart (OpenCart fork)
+- **Products:** Apparel & Accessories, Makeup, Skincare, Fragrance, Men, Hair Care, Books categories; some products are "Call To Order" type with no Add to Cart
+- **Reliable test product:** Tropiques Minerale Loose Bronzer (`product_id=53`, Makeup) — $38.50, Color dropdown, Add to Cart present
+- **Cart:** Server-side session — direct `/index.php?rt=checkout/cart` URL safe
+- **Add to cart:** `<a class="cart">` (not a button) — click navigates directly to cart page (no toast or modal)
+- **Cart qty input:** Name pattern `quantity[productid:hash]` — inspect via eval to get exact name before filling
+- **Cart controls:** `button[title="Update"]` for qty, `a[href*='remove=']` for removal
+- **Checkout:** Guest or register option → guest_step_1 (billing/shipping form) → auto-skips step 2 when one option → checkout confirmation → success
+  - Guest: `vibium eval 'document.querySelector("input[name=account][value=guest]").click()'` then click Continue
+  - Country/state use same numeric IDs as OpenCart: `223` = US, `3669` = Texas
+  - No partial page reload after country select — no field clearing, no Terms reset
+  - Tax (8.5%) added at confirmation stage
+- **Payment:** Cash on Delivery (default), Flat Shipping Rate ($2.00)
+- **Post-order:** `/index.php?rt=checkout/success` — "YOUR ORDER HAS BEEN PROCESSED!"; cart cleared
+- **Success page security:** Direct navigation to success URL redirects to homepage (correctly secured — no order context leak)
+- **No known bugs**
+- **Test data:** First Name `Test`, Last Name `User`, Email `guest_test@example.com`, Tel `12025550100`, Address `123 Test Street`, City `Austin`, Post Code `78701`, Country `223` (US), Zone `3669` (Texas)

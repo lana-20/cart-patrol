@@ -49,6 +49,7 @@ npm install -g vibium
 | [ecommerce-playground.lambdatest.io](https://ecommerce-playground.lambdatest.io/) | OpenCart | Server-side | Cash on Delivery | Many products have broken option selects |
 | [demo.prestashop.com](https://demo.prestashop.com/) | PrestaShop | Server-side (per subdomain) | Bank wire / COD / Check | Store in iframe; subdomains expire in ~2–5 min |
 | [coffee-cart.app](https://coffee-cart.app/) | Custom Vue SPA | In-memory | None (email link) | Products are divs; right-click dialog; promo popup on 3rd item |
+| [automationteststore.com](https://automationteststore.com/) | AbanteCart | Server-side | Cash on Delivery | Add to Cart is `<a>` not button; qty input has hash-based name |
 
 ---
 
@@ -219,6 +220,28 @@ vibium sleep 500 && vibium map
 # Then click the Yes/No dialog buttons
 ```
 
+### AbanteCart — Add to Cart is an anchor element
+AbanteCart renders Add to Cart as `<a class="cart">`, not `<button>`. Clicking navigates directly to the cart page (no toast or modal). Some products use "Call To Order" and have no `a.cart` — skip them.
+```bash
+vibium find "a.cart" && vibium click @e1
+vibium wait load && vibium url  # → /index.php?rt=checkout/cart
+```
+
+### AbanteCart — qty input name contains a hash
+The quantity input name is `quantity[productid:md5hash]`. Get the exact name before filling:
+```bash
+vibium eval 'JSON.stringify([...document.querySelectorAll("input")].filter(i => i.name.startsWith("quantity")).map(i => i.name))'
+# → ["quantity[53:b1a0e11451071a263d5a530074cc3395]"]
+vibium fill "input[name='quantity[53:b1a0e11451071a263d5a530074cc3395]']" "3"
+vibium find "button[title='Update']" && vibium click @e1 && vibium wait load
+```
+
+### AbanteCart — remove via URL href selector
+Remove link is an `<a>` with `remove=productid:hash` in its href. Target it by partial href match:
+```bash
+vibium find "a[href*='remove=']" && vibium click @e1 && vibium wait load
+```
+
 ### Cloudflare-protected demo sites
 Some popular demo hosts put Cloudflare in front. Two challenge types encountered:
 - **`demo.nopcommerce.com`** — Turnstile "managed" (checkbox widget, no iframe in DOM). Cannot be bypassed by automation; browser fingerprinting blocks headless Chrome unconditionally.
@@ -232,6 +255,7 @@ If a site shows "Performing security verification" with a spinning loader or "Ve
 - **Shopify**: Server-side session — direct `/cart` URL is safe regardless of navigation path.
 - **saucedemo.com**: Server-side session — direct `/cart.html` URL is safe.
 - **OpenCart (lambdatest)**: Server-side session — direct cart URL is safe.
+- **AbanteCart (automationteststore)**: Server-side session — direct `/index.php?rt=checkout/cart` is safe.
 - **PrestaShop (demo)**: Server-side session per ephemeral subdomain — direct `/cart?action=show` works within the same instance, but the subdomain expires in ~2–5 minutes.
 
 ### Daemon recovery
@@ -1257,4 +1281,162 @@ vibium text "#content"
 # Empty cart checkout redirect
 vibium go "https://ecommerce-playground.lambdatest.io/index.php?route=checkout/checkout" && vibium wait load && vibium url
 # Expected: redirected to ?route=checkout/cart
+```
+
+---
+
+## Site: automationteststore.com
+
+**URL:** https://automationteststore.com/
+**Platform:** AbanteCart (OpenCart fork)
+**Currency:** USD
+**Cart persistence:** Server-side session
+
+### Key behaviors
+
+- Add to Cart is `<a class="cart">`, not a button — clicking navigates directly to cart page
+- Some products (e.g. Infinitive Mascara, product_id=54) are "Call To Order" with no Add to Cart
+- Reliable test product: **Tropiques Minerale Loose Bronzer** (Makeup → product_id=53, $38.50)
+- Cart qty input name: `quantity[productid:md5hash]` — inspect before filling
+- Remove: `a[href*='remove=']`
+- Guest checkout: radio button `input[name=account][value=guest]`
+- Country/state: same numeric IDs as OpenCart (223 = US, 3669 = Texas)
+- No partial reload after country select — no Terms reset needed
+- Tax (8.5%) appears at confirmation stage
+- Success page correctly redirects to homepage on direct navigation
+
+### Smoke test
+
+```bash
+vibium go https://automationteststore.com/index.php?rt=product/product&product_id=53
+vibium find "a.cart" && vibium click @e1 && vibium wait load
+vibium url  # → /index.php?rt=checkout/cart
+vibium text  # Verify: Tropiques Minerale Loose Bronzer, $38.50
+
+# Guest checkout
+vibium eval 'document.querySelector("a[href*=\"checkout/shipping\"]").click()' && vibium wait load
+vibium url  # → /index.php?rt=account/login
+vibium eval 'document.querySelector("input[name=account][value=guest]").click()'
+vibium click "button[title='Continue']" && vibium wait load
+vibium url  # → /index.php?rt=checkout/guest_step_1
+```
+
+### Flow 1 — Navigation
+
+```bash
+vibium go https://automationteststore.com/ && vibium map
+# Nav links: Apparel & Accessories, Makeup, Skincare, Fragrance, Men, Hair Care, Books
+vibium click "[href*='category_id=36']" && vibium wait load  # Apparel & Accessories
+vibium url  # → ?rt=product/category&path=36
+vibium back && vibium wait load
+vibium click "[href*='category_id=44']" && vibium wait load  # Makeup
+vibium url  # → ?rt=product/category&path=44
+```
+
+### Flow 2 — Product listing
+
+```bash
+vibium go "https://automationteststore.com/index.php?rt=product/category&path=44" && vibium wait load
+vibium text
+# Verify: product names + prices visible
+vibium eval 'document.querySelectorAll("a[title=\"Add to Cart\"]").length'
+# Verify: > 0 (note: some products show "OUT OF STOCK" or "Call To Order")
+```
+
+### Flow 3 — Product detail
+
+```bash
+vibium go "https://automationteststore.com/index.php?rt=product/product&product_id=53"
+vibium wait load && vibium text
+# Verify: "Tropiques Minerale Loose Bronzer", "$38.50", Color dropdown, Add to Cart link
+vibium find "a.cart"
+# Verify: found (not "Call To Order")
+```
+
+### Flow 4 — Add to cart
+
+```bash
+vibium go "https://automationteststore.com/index.php?rt=product/product&product_id=53"
+vibium wait load
+vibium find "a.cart" && vibium click @e1 && vibium wait load
+vibium url  # → /index.php?rt=checkout/cart
+vibium text  # Verify: product name, $38.50 in cart
+```
+
+### Flow 5 — Cart management
+
+```bash
+# Get exact qty input name
+vibium eval 'JSON.stringify([...document.querySelectorAll("input")].filter(i=>i.name.startsWith("quantity")).map(i=>({name:i.name,value:i.value})))'
+# → [{"name":"quantity[53:b1a0e11451071a263d5a530074cc3395]","value":"1"}]
+
+vibium fill "input[name='quantity[53:b1a0e11451071a263d5a530074cc3395]']" "3"
+vibium find "button[title='Update']" && vibium click @e1 && vibium wait load
+vibium text  # Verify: "3 ITEMS - $115.50", Total: $117.50
+
+# Remove
+vibium find "a[href*='remove=']" && vibium click @e1 && vibium wait load
+vibium text  # Verify: "Your shopping cart is empty!"
+```
+
+### Flow 6 — Empty cart
+
+```bash
+# Cart page shows empty state
+vibium url && vibium text  # "Your shopping cart is empty!"
+
+# Checkout from empty cart — redirect to login → then to cart (blocked)
+vibium go "https://automationteststore.com/index.php?rt=checkout/shipping" && vibium wait load
+vibium url  # → /index.php?rt=checkout/cart (redirected, not let through)
+```
+
+### Flow 7 — Checkout form validation
+
+```bash
+# Add item first
+vibium go "https://automationteststore.com/index.php?rt=product/product&product_id=53"
+vibium find "a.cart" && vibium click @e1 && vibium wait load
+
+# Navigate to guest checkout step 1
+vibium eval 'document.querySelector("a[href*=\"checkout/shipping\"]").click()' && vibium wait load
+vibium eval 'document.querySelector("input[name=account][value=guest]").click()'
+vibium click "button[title='Continue']" && vibium wait load
+
+# Submit without filling any fields
+vibium click "button[title='Continue']" && vibium wait load
+vibium eval 'JSON.stringify([...document.querySelectorAll(".help-block")].map(el=>el.textContent.trim()).filter(t=>t))'
+# Verify: errors for First Name, Last Name, E-Mail, Address 1, City, Region/State, ZIP
+```
+
+### Flow 8 — Full checkout (happy path)
+
+```bash
+# Fill billing/shipping form
+vibium fill "#guestFrm_firstname" "Test"
+vibium fill "#guestFrm_lastname" "User"
+vibium fill "#guestFrm_email" "guest_test@example.com"
+vibium fill "#guestFrm_telephone" "12025550100"
+vibium fill "#guestFrm_address_1" "123 Test Street"
+vibium fill "#guestFrm_city" "Austin"
+vibium eval 'JSON.stringify([...document.querySelector("#guestFrm_country_id").options].filter(o=>o.text.includes("United States")).map(o=>o.value))'
+# → ["223"]
+vibium select "#guestFrm_country_id" "223" && vibium wait load && vibium sleep 1000
+vibium select "#guestFrm_zone_id" "3669"
+vibium fill "#guestFrm_postcode" "78701"
+vibium click "button[title='Continue']" && vibium wait load
+vibium url  # → /index.php?rt=checkout/guest_step_3
+
+# Confirmation page — review and confirm
+vibium text ".contentpanel"
+# Verify: Tropiques Minerale, $38.50, Flat Shipping Rate $2.00, Tax $3.27, Total $43.77
+vibium click "#checkout_btn" && vibium wait load
+vibium url  # → /index.php?rt=checkout/success
+vibium text "h1"  # → "YOUR ORDER HAS BEEN PROCESSED!"
+
+# Verify cart cleared
+vibium eval 'document.querySelector(".items-count")?.textContent'  # → "0 ITEMS"
+
+# Verify success page secured
+vibium go "https://automationteststore.com/index.php?rt=checkout/success" && vibium wait load
+vibium url  # → homepage (redirected, not order context shown)
 ```
