@@ -43,6 +43,7 @@ npm install -g vibium
 |------|------|-------|
 | [var.parts](https://var.parts/) | Custom React | In-memory cart, custom payment UI |
 | [sauce-demo.myshopify.com](https://sauce-demo.myshopify.com/) | Shopify | Server-side cart, PCI iframe payment |
+| [saucedemo.com](https://www.saucedemo.com) | Custom React (demo) | Login-gated, fake payment, no qty controls in cart |
 
 ---
 
@@ -418,4 +419,162 @@ vibium url
 # Verify: URL contains /thank-you
 vibium text
 # Verify: "Thank you!", "Your order is confirmed", confirmation number, order summary
+```
+
+---
+
+## Site: saucedemo.com
+
+**URL:** https://www.saucedemo.com  
+**Type:** Login-gated demo store (custom React, no real payment)
+
+**Login credentials** (shown on login page):
+- Username: `standard_user` (use this for all flows)
+- Password: `secret_sauce`
+- Other users: `locked_out_user`, `problem_user`, `performance_glitch_user`, `error_user`, `visual_user`
+
+**Products:** 6 items, all available — Sauce Labs Backpack ($29.99), Bike Light ($9.99), Bolt T-Shirt ($15.99), Fleece Jacket ($49.99), Onesie ($7.99), Test.allTheThings() T-Shirt Red ($15.99)
+
+**Cart:** Server-side session — direct URL navigation to `/cart` is safe.
+
+**Payment:** No real payment form. Uses fake "SauceCard #31337" automatically. No PCI iframes.
+
+**Known bugs:**
+- Checkout with empty cart is not blocked — proceeds to checkout form with no warning
+- "About" link in burger menu navigates to an external site that hangs (long load / timeout)
+
+**Cart limitation:** No quantity +/− controls. Cart only supports add/remove. Quantity shown as label, not editable.
+
+### Test flows
+
+#### 1. Login
+```bash
+vibium go https://www.saucedemo.com && vibium map
+vibium fill @e1 "standard_user" && vibium fill @e2 "secret_sauce" && vibium click @e3
+vibium wait load && vibium url
+# Verify: URL = https://www.saucedemo.com/inventory.html
+```
+
+#### 2. Navigation
+```bash
+# Burger menu — open, check links, close before next interaction
+vibium click "#react-burger-menu-btn" && vibium sleep 500
+vibium map --selector ".bm-menu"
+# Verify: All Items, About, Logout, Reset App State present
+vibium click "#react-burger-cross-btn" && vibium sleep 600
+# Note: "About" navigates to external site that may hang — skip or use vibium go to recover
+```
+
+#### 3. Product listing
+```bash
+vibium go https://www.saucedemo.com/inventory.html && vibium wait load
+vibium text ".inventory_list"
+# Verify: 6 products with names and prices visible
+vibium eval 'document.querySelectorAll("button").length'
+# Verify: 8 buttons (6 Add to cart + 2 header)
+```
+
+#### 4. Product detail
+```bash
+vibium find text "Sauce Labs Backpack" && vibium click @e1
+vibium wait load && vibium url
+# Verify: URL = /inventory-item.html?id=4
+vibium text
+# Verify: product name, price ($29.99), description, "Add to cart" button
+```
+
+#### 5. Add to cart
+```bash
+vibium find text "Add to cart" && vibium click @e1
+vibium diff map
+# Verify: button changed to "Remove"
+vibium eval 'document.querySelector(".shopping_cart_badge")?.textContent'
+# Verify: "1"
+```
+
+#### 6. Cart management
+```bash
+vibium click ".shopping_cart_link" && vibium wait load && vibium url
+# Verify: URL = /cart.html
+vibium text
+# Verify: added item present with correct price, Remove button present
+# Note: no quantity controls — qty shown as static "1" label only
+
+vibium find text "Remove" && vibium click @e1
+vibium diff map
+# Verify: item removed from cart list
+vibium eval 'document.querySelector(".shopping_cart_badge")?.textContent || "empty"'
+# Verify: "empty" (badge gone)
+```
+
+#### 7. Empty cart — checkout not blocked (known bug)
+```bash
+# With empty cart, click Checkout:
+vibium find text "Checkout" && vibium click @e1 && vibium wait load && vibium url
+# Actual: /checkout-step-one.html (proceeds without warning)
+# Expected: empty-cart message or block
+# STATUS: BUG — empty cart checkout is not blocked
+```
+
+#### 8. Checkout form validation
+```bash
+# From /checkout-step-one.html (with or without items):
+vibium click "#continue" && vibium text
+# Verify: "Error: First Name is required"
+vibium fill "#first-name" "Test" && vibium click "#continue" && vibium text
+# Verify: "Error: Last Name is required"
+vibium fill "#last-name" "User" && vibium click "#continue" && vibium text
+# Verify: "Error: Postal Code is required"
+```
+
+#### 9. Full checkout (happy path)
+```bash
+# 1. Add item
+vibium go https://www.saucedemo.com/inventory.html && vibium wait load
+vibium find text "Add to cart" && vibium click @e1
+
+# 2. Go to cart and checkout
+vibium click ".shopping_cart_link" && vibium wait load
+vibium find text "Checkout" && vibium click @e1 && vibium wait load
+# Verify: URL = /checkout-step-one.html
+
+# 3. Fill delivery info
+vibium fill "#first-name" "Test"
+vibium fill "#last-name" "User"
+vibium fill "#postal-code" "12345"
+vibium click "#continue" && vibium wait load
+# Verify: URL = /checkout-step-two.html
+
+# 4. Review order summary
+vibium text
+# Verify: item name + price, "SauceCard #31337", "Free Pony Express Delivery!",
+#         Item total, Tax, Total
+
+# 5. Finish
+vibium find text "Finish" && vibium click @e1 && vibium wait load
+vibium url
+# Verify: URL = /checkout-complete.html
+vibium text
+# Verify: "Checkout: Complete!", "Thank you for your order!"
+vibium eval 'document.querySelector(".shopping_cart_badge")?.textContent || "empty"'
+# Verify: "empty" (cart cleared)
+```
+
+#### Quick smoke test
+```bash
+vibium go https://www.saucedemo.com && vibium map
+vibium fill @e1 "standard_user" && vibium fill @e2 "secret_sauce" && vibium click @e3
+vibium wait load && vibium url
+# Expected: /inventory.html
+
+vibium find text "Add to cart" && vibium click @e1
+vibium eval 'document.querySelector(".shopping_cart_badge")?.textContent'
+# Expected: "1"
+
+vibium click ".shopping_cart_link" && vibium wait load
+vibium find text "Checkout" && vibium click @e1 && vibium wait load
+vibium fill "#first-name" "Test" && vibium fill "#last-name" "User" && vibium fill "#postal-code" "12345"
+vibium click "#continue" && vibium wait load
+vibium find text "Finish" && vibium click @e1 && vibium wait load && vibium url
+# Expected: /checkout-complete.html
 ```

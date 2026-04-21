@@ -138,6 +138,24 @@ After selecting country, page may reload and clear address fields — refill the
 ### Cart state persistence
 - **var.parts**: in-memory only — cart lost on page reload or direct `/cart` navigation. Always navigate to cart via UI (cart badge).
 - **Shopify**: server-side session — `/cart` URL works regardless of how you navigate.
+- **saucedemo.com**: server-side session — direct URL navigation safe.
+
+### Login-gated sites (saucedemo.com)
+Always log in before testing any flow. Credentials for saucedemo.com are shown on the login page itself:
+```
+vibium fill "#user-name" "standard_user"
+vibium fill "#password" "secret_sauce"
+vibium click "#login-button"
+vibium wait load
+```
+
+### Burger menu navigation (saucedemo.com)
+The menu button is obscured while the menu is open. Always close before re-opening:
+```
+vibium click "#react-burger-menu-btn" && vibium sleep 500
+# interact with menu items
+vibium click "#react-burger-cross-btn" && vibium sleep 600
+```
 
 ## Site profiles
 
@@ -169,3 +187,18 @@ After selecting country, page may reload and clear address fields — refill the
 - Test payment: card `1`, expiry `12/30`, CVV `123`, name `Tester`
 - Shopify bogus gateway accepts card number `1` — full order confirmation with order # returned
 - Post-payment: `/thank-you` page with confirmation number, order summary, and shipping details
+
+### saucedemo.com (https://www.saucedemo.com)
+
+- Login required — credentials shown on login page; use `standard_user` / `secret_sauce`
+- 6 products, all available (no sold-out items for standard_user), currency USD
+- Cart: server-side session — direct `/cart.html` URL navigation is safe
+- Navigation via burger menu (`#react-burger-menu-btn`) — not a standard nav bar
+- Add to cart confirmation: button text changes to "Remove", cart badge increments
+- No quantity controls in cart — add/remove only, qty shown as static label
+- Checkout: info form (first name, last name, postal code) → overview → complete
+- Payment: no payment form — fake "SauceCard #31337" applied automatically
+- Post-order: `/checkout-complete.html` with "Thank you for your order!", cart cleared
+- Known bug: empty cart checkout not blocked — proceeds to checkout form with no warning
+- Known bug: "About" menu link navigates to external site that may hang (use `vibium go` to recover)
+- Test data: First Name `Test`, Last Name `User`, Postal Code `12345`
