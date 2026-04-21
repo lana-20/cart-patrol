@@ -48,6 +48,7 @@ npm install -g vibium
 | [saucedemo.com](https://www.saucedemo.com) | Custom React | Server-side | Fake (auto) | Login-gated demo, no qty controls |
 | [ecommerce-playground.lambdatest.io](https://ecommerce-playground.lambdatest.io/) | OpenCart | Server-side | Cash on Delivery | Many products have broken option selects |
 | [demo.prestashop.com](https://demo.prestashop.com/) | PrestaShop | Server-side (per subdomain) | Bank wire / COD / Check | Store in iframe; subdomains expire in ~2–5 min |
+| [coffee-cart.app](https://coffee-cart.app/) | Custom Vue SPA | In-memory | None (email link) | Products are divs; right-click dialog; promo popup on 3rd item |
 
 ---
 
@@ -198,6 +199,26 @@ vibium eval 'JSON.stringify([...document.querySelector("#field-id_country").opti
 vibium select "#field-id_country" "8"
 ```
 
+### SPA in-memory carts — use UI nav, not vibium go
+Some SPAs (Vue, React) keep cart state in component memory. A `vibium go <cart-url>` triggers a full page reload and wipes the cart. Always navigate via the UI link:
+```bash
+vibium find "a[href='/cart']" && vibium click @e1 && vibium wait load
+# NOT: vibium go https://coffee-cart.app/cart
+```
+
+### Product cards that aren't buttons or links
+Some apps use `<div>` elements as clickable product cards with `data-test` or `aria-label` attributes instead of `<button>` or `<a>`. `vibium map` won't surface them — target by attribute:
+```bash
+vibium find "[data-test='Espresso']" && vibium click @e1
+# Underscores for spaces: Flat_White, Cafe_Latte, Espresso_Con_Panna
+```
+To right-click (contextmenu) a product card:
+```bash
+vibium eval 'document.querySelector("[data-test=\"Espresso\"]").dispatchEvent(new MouseEvent("contextmenu", {bubbles:true}))'
+vibium sleep 500 && vibium map
+# Then click the Yes/No dialog buttons
+```
+
 ### Cloudflare-protected demo sites
 Some popular demo hosts put Cloudflare in front. Two challenge types encountered:
 - **`demo.nopcommerce.com`** — Turnstile "managed" (checkbox widget, no iframe in DOM). Cannot be bypassed by automation; browser fingerprinting blocks headless Chrome unconditionally.
@@ -206,7 +227,8 @@ Some popular demo hosts put Cloudflare in front. Two challenge types encountered
 If a site shows "Performing security verification" with a spinning loader or "Verify you are human" checkbox and never proceeds, it's Cloudflare-protected. Skip it and find an unprotected instance.
 
 ### Cart state persistence
-- **var.parts**: In-memory — cart is lost on any direct URL navigation to `/cart`. Always use the header cart badge.
+- **var.parts**: In-memory — cart is lost on any direct URL navigation. Always use the header cart badge.
+- **coffee-cart.app**: In-memory — use `vibium find "a[href='/cart']" && vibium click @e1`, never `vibium go`.
 - **Shopify**: Server-side session — direct `/cart` URL is safe regardless of navigation path.
 - **saucedemo.com**: Server-side session — direct `/cart.html` URL is safe.
 - **OpenCart (lambdatest)**: Server-side session — direct cart URL is safe.
@@ -682,6 +704,196 @@ vibium fill "#first-name" "Test" && vibium fill "#last-name" "User" && vibium fi
 vibium click "#continue" && vibium wait load
 vibium find text "Finish" && vibium click @e1 && vibium wait load && vibium url
 # Expected: /checkout-complete.html
+```
+
+---
+
+## Site: coffee-cart.app
+
+**URL:** https://coffee-cart.app/  
+**Platform:** Custom Vue.js SPA  
+**Products:** 9 coffees, $7–$19 — Espresso, Espresso Macchiato, Cappuccino, Mocha, Flat White, Americano, Cafe Latte, Espresso Con Panna, Cafe Breve  
+**Cart:** In-memory — wiped on full page reload; always navigate via `<a href='/cart'>` link  
+**Checkout:** Modal overlay, not a separate page; no real payment gateway
+
+**Special behaviors:**
+- Promo popup fires on every 3rd item added: discounted upsell with Yes/No
+- Double-click `<h4>` name translates to Chinese; double-click again reverts
+- Right-click on any cup opens an "Add X to the cart?" confirm dialog
+- `?breakable=1` param: random intermittent add-to-cart errors (for DevTools practice)
+- `?ad=1` param: injects ad banners that slow page load
+
+**No known bugs** — all core flows pass.
+
+### Test flows
+
+#### 1. Navigation
+```bash
+vibium go https://coffee-cart.app/ && vibium map
+# @e1 Menu (/), @e2 Cart (/cart), @e3 GitHub (/github — internal info page, not external)
+vibium click @e2 && vibium wait load && vibium url
+# Expected: https://coffee-cart.app/cart
+vibium click @e1 && vibium wait load && vibium url
+# Expected: https://coffee-cart.app/
+vibium click @e3 && vibium wait load && vibium url
+# Expected: https://coffee-cart.app/github
+vibium text
+# Verify: page describes special behaviors (right-click, double-click, promo, breakable, etc.)
+```
+
+#### 2. Product listing
+```bash
+vibium go https://coffee-cart.app/ && vibium wait load
+vibium text
+# Verify: 9 product names and prices visible
+vibium eval 'document.querySelectorAll("div.cup-body").length'
+# Expected: 9
+```
+Note: products are `div.cup-body[data-test]` elements — `vibium map` returns only nav links and the checkout button.
+
+#### 3. Add to cart (click)
+```bash
+vibium find "[data-test='Espresso']" && vibium click @e1 && vibium sleep 800
+vibium eval '[...document.querySelectorAll("li")].find(el => el.textContent.includes("cart"))?.textContent.trim()'
+# Expected: "cart (1)"
+vibium eval 'document.querySelector("button[data-test=checkout]")?.textContent.trim()'
+# Expected: "Total: $10.00"
+```
+
+#### 4. Add to cart (right-click dialog)
+```bash
+vibium eval 'document.querySelector("[data-test=\"Espresso_Macchiato\"]").dispatchEvent(new MouseEvent("contextmenu", {bubbles:true}))'
+vibium sleep 500 && vibium screenshot -o /tmp/coffee_rclick.png
+# Verify: "Add Espresso Macchiato to the cart?" dialog visible with Yes / No buttons
+
+# Accept:
+vibium find role button --name "Yes" && vibium click @e1 && vibium sleep 500
+# Expected: cart count +1
+
+# Or dismiss:
+vibium find role button --name "No" && vibium click @e1 && vibium sleep 500
+# Expected: cart count unchanged
+```
+
+#### 5. Cart management
+```bash
+# Navigate via SPA link — never vibium go /cart
+vibium find "a[href='/cart']" && vibium click @e1 && vibium wait load
+vibium text
+# Verify: items listed with "Item / Unit / Total" table, grand total shown
+
+vibium map
+# @eN [button] "Add one Espresso", "Remove one Espresso", "Remove all Espresso"
+
+# Increase qty
+vibium find role button --name "Add one Espresso" && vibium click @e1 && vibium sleep 500
+vibium text
+# Verify: "x 2", subtotal doubled, total updated
+
+# Decrease qty
+vibium find role button --name "Remove one Espresso" && vibium click @e1 && vibium sleep 500
+# Verify: back to x 1
+
+# Remove all
+vibium find role button --name "Remove all Espresso" && vibium click @e1 && vibium sleep 500
+# Verify: Espresso row gone, total updated
+```
+
+#### 6. Empty cart
+```bash
+# After clearing all items:
+vibium text
+# Verify: "No coffee, go add some."
+vibium map
+# Verify: "Proceed to checkout" button absent (no @eN for it)
+```
+
+#### 7. Promo popup (every 3rd item)
+```bash
+vibium find "[data-test='Mocha']" && vibium click @e1 && vibium sleep 400
+vibium find "[data-test='Americano']" && vibium click @e1 && vibium sleep 400
+vibium find "[data-test='Flat_White']" && vibium click @e1 && vibium sleep 1500
+vibium screenshot -o /tmp/coffee_promo.png
+# Verify: "It's your lucky day! Get an extra cup of [X] for $4."
+
+# Accept promo:
+vibium find role button --name "Yes, of course!" && vibium click @e1 && vibium sleep 500
+# Expected: cart count +1 (discounted item added)
+
+# Skip promo (reset and repeat for skip path):
+vibium find role button --name "Nah, I'll skip." && vibium click @e1 && vibium sleep 500
+# Expected: cart count unchanged
+```
+
+#### 8. Checkout form validation
+```bash
+vibium find role button --name "Proceed to checkout" && vibium click @e1 && vibium sleep 800
+# Verify: "Payment details" modal appears
+vibium click "#submit-payment" && vibium sleep 500
+# Verify: "Please fill out this field." on Name (HTML5 native tooltip)
+
+vibium fill "#name" "Test User" && vibium click "#submit-payment" && vibium sleep 500
+# Verify: "Please fill out this field." on Email
+
+vibium fill "#email" "notanemail" && vibium click "#submit-payment" && vibium sleep 500
+# Verify: "Please include an '@' in the email address."
+```
+
+#### 9. Full checkout (happy path)
+```bash
+vibium go https://coffee-cart.app/ && vibium wait load
+vibium find "[data-test='Espresso']" && vibium click @e1 && vibium sleep 500
+vibium find "[data-test='Mocha']" && vibium click @e1 && vibium sleep 500
+
+vibium find role button --name "Proceed to checkout" && vibium click @e1 && vibium sleep 800
+
+vibium fill "#name" "Test User"
+vibium fill "#email" "test@example.com"
+vibium click "#submit-payment" && vibium sleep 2000
+
+vibium screenshot -o /tmp/coffee_done.png
+vibium text
+# Verify: "Thanks for your purchase. Please check your email for payment."
+# Verify: cart badge shows "cart (0)"
+# Verify: a random product is highlighted in gold (post-order promo recommendation)
+```
+
+#### 10. Double-click translation
+```bash
+vibium go https://coffee-cart.app/ && vibium wait load
+vibium eval 'document.querySelector("h4").textContent.trim()'
+# Expected: "Espresso $10.00"
+
+vibium dblclick "h4" && vibium sleep 500
+vibium eval 'document.querySelector("h4").textContent.trim()'
+# Expected: "特浓咖啡 $10.00"
+
+vibium dblclick "h4" && vibium sleep 500
+vibium eval 'document.querySelector("h4").textContent.trim()'
+# Expected: "Espresso $10.00" (reverted)
+```
+
+#### Quick smoke test
+```bash
+vibium go https://coffee-cart.app/ && vibium wait load
+
+# Add two items
+vibium find "[data-test='Espresso']" && vibium click @e1 && vibium sleep 400
+vibium find "[data-test='Americano']" && vibium click @e1 && vibium sleep 400
+vibium eval 'document.querySelector("button[data-test=checkout]")?.textContent.trim()'
+# Expected: "Total: $17.00"
+
+# Navigate to cart via SPA link
+vibium find "a[href='/cart']" && vibium click @e1 && vibium wait load
+vibium text
+# Verify: Espresso $10.00, Americano $7.00, Total: $17.00
+
+# Checkout
+vibium find role button --name "Proceed to checkout" && vibium click @e1 && vibium sleep 800
+vibium fill "#name" "Test User" && vibium fill "#email" "test@example.com"
+vibium click "#submit-payment" && vibium sleep 2000
+vibium text
+# Verify: "Thanks for your purchase..."
 ```
 
 ---

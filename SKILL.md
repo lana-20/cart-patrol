@@ -228,8 +228,30 @@ vibium eval 'document.querySelector("form button[type=submit]").click()'
 ### Cloudflare protection
 `demo.nopcommerce.com` and `demo.opencart.com` are behind Cloudflare Turnstile (managed) and JS challenges respectively. These block headless browsers at the fingerprinting level — no DOM interaction can bypass them. Avoid these sites for automation testing.
 
+### SPA in-memory carts — never use vibium go for cart navigation
+Some SPAs store cart state in memory (Vue/React component state). A `vibium go` to the cart URL causes a full page reload that wipes the cart. Always navigate via UI links:
+```
+vibium find "a[href='/cart']" && vibium click @e1 && vibium wait load
+# NOT: vibium go https://coffee-cart.app/cart
+```
+Sites with in-memory carts: **var.parts**, **coffee-cart.app**
+
+### coffee-cart.app — product cards are divs, not buttons
+Products are `div.cup-body[data-test][aria-label]` elements. Use `data-test` attribute to target them:
+```
+vibium find "[data-test='Espresso']" && vibium click @e1
+vibium find "[data-test='Flat_White']" && vibium click @e1   # underscores for spaces
+```
+Right-click opens a confirm dialog — dispatch contextmenu event:
+```
+vibium eval 'document.querySelector("[data-test=\"Espresso\"]").dispatchEvent(new MouseEvent("contextmenu", {bubbles:true}))'
+vibium sleep 500
+vibium find role button --name "Yes" && vibium click @e1   # or "No" to dismiss
+```
+
 ### Cart state persistence
 - **var.parts**: in-memory — never navigate directly to `/cart`. Use the cart badge in the header.
+- **coffee-cart.app**: in-memory — use `vibium find "a[href='/cart']" && vibium click @e1`, not `vibium go`.
 - **Shopify**: server-side session — direct `/cart` URL is safe.
 - **saucedemo.com**: server-side session — direct `/cart.html` URL is safe.
 - **OpenCart (lambdatest)**: server-side session — direct `/cart` URL is safe.
@@ -325,6 +347,27 @@ vibium daemon stop && sleep 2 && vibium daemon start && sleep 2
   - Cart Increase button permanently `disabled` in cart — quantity cannot be increased via UI
   - Empty cart page (`/cart?action=show`) silently redirects to home with no "cart is empty" message
   - "Your address is incomplete" error may appear on valid addresses (demo instance data isolation issue)
+
+---
+
+### coffee-cart.app (https://coffee-cart.app/)
+
+- **Platform:** Custom Vue.js SPA, in-memory cart
+- **Products:** 9 coffees — Espresso $10, Espresso Macchiato $12, Cappuccino $19, Mocha $8, Flat White $18, Americano $7, Cafe Latte $16, Espresso Con Panna $14, Cafe Breve $15
+- **Cart:** In-memory — never use `vibium go https://coffee-cart.app/cart`. Navigate via `vibium find "a[href='/cart']" && vibium click @e1`.
+- **Product cards:** `div.cup-body[data-test][aria-label]` — click to add directly; use `data-test` attribute (underscores for spaces: `Flat_White`, `Cafe_Latte`, `Espresso_Con_Panna`, `Cafe_Breve`)
+- **Right-click dialog:** Dispatching `contextmenu` event opens "Add X to the cart?" modal with Yes/No buttons
+- **Cart controls:** `button[aria-label="Add one X"]`, `button[aria-label="Remove one X"]`, `button[aria-label="Remove all X"]` — totals update instantly
+- **Empty cart:** "No coffee, go add some." message; checkout button disappears entirely
+- **Checkout:** Modal overlay (not a page) — fields `#name`, `#email`, optional `#promotion` checkbox
+- **Validation:** HTML5 native — name required, email required + format checked
+- **Post-order:** "Thanks for your purchase. Please check your email for payment." banner; cart cleared; random product gets gold promo highlight
+- **No order confirmation URL** — success is an on-page banner only
+- **Special behaviors:**
+  - Promo popup on every 3rd item added: "It's your lucky day! Get an extra cup of [X] for $4." — Yes adds at discount, "Nah, I'll skip." dismisses
+  - Double-click `<h4>` title translates name to Chinese (e.g. 特浓咖啡); double-click again reverts
+  - `?breakable=1` param simulates intermittent add-to-cart errors (random, not every click)
+  - `?ad=1` param adds ad banners that slow page load
 
 ---
 
