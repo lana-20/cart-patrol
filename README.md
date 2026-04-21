@@ -1,6 +1,36 @@
-# var-parts-test
+# cart-patrol
 
 E2E test skill for https://var.parts/ — a test storefront for robot parts (Vibium Automation Robots). Uses vibium browser automation.
+
+## Installation
+
+**Via skills CLI (recommended):**
+```bash
+npx skills add lana-20/cart-patrol -g
+```
+
+**Manual:**
+```bash
+git clone https://github.com/lana-20/cart-patrol.git ~/.claude/skills/cart-patrol
+```
+
+## Usage
+
+Once installed, invoke in Claude Code:
+```
+/cart-patrol
+```
+
+Or with a specific flow:
+```
+/cart-patrol smoke
+/cart-patrol checkout
+```
+
+Requires [vibium](https://www.npmjs.com/package/vibium) to be installed:
+```bash
+npm install -g vibium
+```
 
 ## What the site does
 
