@@ -47,6 +47,7 @@ npm install -g vibium
 | [sauce-demo.myshopify.com](https://sauce-demo.myshopify.com/) | Shopify | Server-side | PCI iframes | 2 sold-out products |
 | [saucedemo.com](https://www.saucedemo.com) | Custom React | Server-side | Fake (auto) | Login-gated demo, no qty controls |
 | [ecommerce-playground.lambdatest.io](https://ecommerce-playground.lambdatest.io/) | OpenCart | Server-side | Cash on Delivery | Many products have broken option selects |
+| [demo.prestashop.com](https://demo.prestashop.com/) | PrestaShop | Server-side (per subdomain) | Bank wire / COD / Check | Store in iframe; subdomains expire in ~2–5 min |
 
 ---
 
@@ -150,11 +151,66 @@ Iframe IDs change per session. Discover them fresh each run:
 vibium eval 'JSON.stringify([...document.querySelectorAll("iframe")].map((f,i) => ({i, id: f.id, src: f.src?.substring(0,60)})))'
 ```
 
+### PrestaShop demo — ephemeral subdomains and iframe wrapper
+`demo.prestashop.com` wraps the actual store in a `#framelive` iframe. Navigate to the inner URL directly to interact with it:
+```bash
+vibium go https://demo.prestashop.com/ && vibium sleep 3000
+vibium eval 'document.querySelector("#framelive")?.src'
+# → https://gigantic-appliance.demo.prestashop.com/en/...
+vibium go "https://gigantic-appliance.demo.prestashop.com/en/"
+```
+The inner subdomain expires in ~2–5 minutes. If you hit "Oops... couldn't find the shop", fetch a new subdomain from the iframe src and restart. Subdomains cannot be reused after expiry.
+
+### PrestaShop qty update — Enter required
+Filling the qty input alone does nothing. Always follow with Enter:
+```bash
+vibium fill "input[name='product-quantity-spin']" "2"
+vibium press Enter "input[name='product-quantity-spin']"
+vibium sleep 2000
+```
+
+### PrestaShop remove — target the anchor, not the div
+`vibium find text "Remove"` returns an outer wrapper `<div>` that fails with "element is obscured". Target the inner link directly:
+```bash
+vibium find "a.js-remove-from-cart" && vibium click @e1 && vibium sleep 2000
+# Reload to confirm — the DOM update is async
+vibium reload && vibium wait load
+```
+
+### PrestaShop address fields — scroll before fill
+Address form fields have zero computed size until scrolled into view:
+```bash
+vibium scroll into-view "#field-address1" && vibium sleep 300
+vibium fill "#field-address1" "123 Test Street"
+vibium fill "#field-postcode" "75001"
+vibium fill "#field-city" "Paris"
+```
+Submit buttons suffer the same issue — use eval.click():
+```bash
+vibium eval 'document.querySelector("form button[type=submit]").click()'
+```
+
+### PrestaShop country dropdown — numeric IDs
+Like OpenCart, PrestaShop uses numeric option values. Inspect before selecting:
+```bash
+vibium eval 'JSON.stringify([...document.querySelector("#field-id_country").options].map(o => ({v:o.value,t:o.text})))'
+# → [{"v":"","t":"-- please choose --"},{"v":"8","t":"France"},{"v":"21","t":"United States"}]
+vibium select "#field-id_country" "8"
+```
+
+### Cloudflare-protected demo sites
+Some popular demo hosts put Cloudflare in front. Two challenge types encountered:
+- **`demo.nopcommerce.com`** — Turnstile "managed" (checkbox widget, no iframe in DOM). Cannot be bypassed by automation; browser fingerprinting blocks headless Chrome unconditionally.
+- **`demo.opencart.com`** — JS challenge (spinner). Also fails — browser entropy check never passes in headless mode.
+
+If a site shows "Performing security verification" with a spinning loader or "Verify you are human" checkbox and never proceeds, it's Cloudflare-protected. Skip it and find an unprotected instance.
+
 ### Cart state persistence
 - **var.parts**: In-memory — cart is lost on any direct URL navigation to `/cart`. Always use the header cart badge.
 - **Shopify**: Server-side session — direct `/cart` URL is safe regardless of navigation path.
 - **saucedemo.com**: Server-side session — direct `/cart.html` URL is safe.
 - **OpenCart (lambdatest)**: Server-side session — direct cart URL is safe.
+- **PrestaShop (demo)**: Server-side session per ephemeral subdomain — direct `/cart?action=show` works within the same instance, but the subdomain expires in ~2–5 minutes.
 
 ### Daemon recovery
 On long sessions, the vibium daemon can drop with "broken pipe" or "i/o timeout". Restart and re-navigate:
@@ -626,6 +682,170 @@ vibium fill "#first-name" "Test" && vibium fill "#last-name" "User" && vibium fi
 vibium click "#continue" && vibium wait load
 vibium find text "Finish" && vibium click @e1 && vibium wait load && vibium url
 # Expected: /checkout-complete.html
+```
+
+---
+
+## Site: demo.prestashop.com
+
+**URL:** https://demo.prestashop.com/ (inner store: `*.demo.prestashop.com/en/`)  
+**Platform:** PrestaShop  
+**Products:** Hummingbird printed t-shirt (€22.94 sale / €28.68), Hummingbird sweater (€34.46), framed posters. Categories: Clothes, Accessories, Art.  
+**Cart:** Server-side session per ephemeral subdomain — expires in ~2–5 minutes  
+**Checkout:** 4-step: Personal Information → Addresses → Shipping method → Payment
+
+**Known bugs:**
+- Cart quantity Increase button is permanently `disabled` — cannot increase qty from cart view
+- Empty cart page silently redirects to home; no "cart is empty" message shown
+- "Your address is incomplete" error can appear even with a valid complete address (demo instance isolation issue)
+
+**Automation quirks:**
+- Store is inside a `#framelive` iframe — always navigate directly to the inner subdomain URL
+- Subdomains expire mid-session; get a fresh one from the iframe src if the page 404s
+- Address form fields are off-screen and report zero-size — scroll into view before filling
+- Submit buttons also zero-size — use `eval 'form button[type=submit].click()'`
+- Remove link is inside a wrapper div; target `a.js-remove-from-cart` directly
+- Qty update requires fill + Enter (fill alone does nothing)
+- Country dropdown uses numeric IDs (`8` = France, `21` = United States)
+
+### Test flows
+
+#### 1. Get a live instance
+```bash
+vibium go https://demo.prestashop.com/ && vibium sleep 3000
+vibium eval 'document.querySelector("#framelive")?.src'
+# Copy the inner URL, e.g. https://gigantic-appliance.demo.prestashop.com/en/
+vibium go "https://gigantic-appliance.demo.prestashop.com/en/" && vibium wait load
+```
+
+#### 2. Navigation
+```bash
+vibium find text "Clothes" && vibium click @e1 && vibium wait load && vibium url
+# Expected: /3-clothes
+vibium back && vibium wait load
+vibium find text "Accessories" && vibium click @e1 && vibium wait load && vibium url
+# Expected: /6-accessories
+vibium back && vibium wait load
+vibium find text "Art" && vibium click @e1 && vibium wait load && vibium url
+# Expected: /9-art
+```
+
+#### 3. Product listing
+```bash
+vibium find text "Clothes" && vibium click @e1 && vibium wait load
+vibium text
+# Verify: "Hummingbird printed t-shirt", "Hummingbird printed sweater", prices visible
+vibium map --selector ".products"
+# Verify: "Add to cart" buttons present for each product
+```
+
+#### 4. Product detail
+```bash
+vibium find text "Clothes" && vibium click @e1 && vibium wait load
+vibium find role link --name "View product Hummingbird printed t-shirt" && vibium click @e1 && vibium wait load
+vibium text
+# Verify: name, sale price (€22.94), regular price (€28.68), -20% badge
+# Verify: Size selector (S/M/L/XL), Color selector (White/Black), Add to cart present
+```
+
+#### 5. Add to cart
+```bash
+vibium find role button --name "Add to cart" && vibium click @e1 && vibium sleep 2000
+# Verify: modal appeared with "Continue shopping" and "Proceed to checkout"
+# Verify: cart badge now shows "View cart (1 products)"
+vibium find text "Proceed to checkout" && vibium click @e1 && vibium wait load && vibium url
+# Expected: /cart?action=show
+```
+
+#### 6. Cart management
+```bash
+# Qty update — fill + Enter (fill alone is ignored)
+vibium fill "input[name='product-quantity-spin']" "2"
+vibium press Enter "input[name='product-quantity-spin']" && vibium sleep 2000
+vibium eval 'document.querySelector("[class*=total]")?.textContent.trim().replace(/\s+/g," ")'
+# Verify: "2 items €45.89 ... Total (tax incl.) €45.89"
+
+# Remove — target the anchor, not the div
+vibium find "a.js-remove-from-cart" && vibium click @e1 && vibium sleep 2000
+vibium reload && vibium wait load
+# Verify: redirected to home, cart badge = 0
+```
+
+#### 7. Empty cart
+```bash
+vibium go "<subdomain>/cart?action=show" && vibium wait load
+# Actual: silently redirects to home with no message (BUG)
+vibium go "<subdomain>/order" && vibium wait load && vibium url
+# Verify: redirected away from checkout (not allowed with empty cart)
+```
+
+#### 8. Checkout form validation
+```bash
+# Add item, reach checkout step 1 (Personal Information)
+vibium eval 'document.querySelector("button[type=submit]").click()' && vibium sleep 1500
+vibium eval 'JSON.stringify([...document.querySelectorAll(":invalid")].map(el => ({name: el.name, msg: el.validationMessage})))'
+# Verify: firstname, lastname, email, psgdpr, customer_privacy all invalid
+# Screenshot shows red-bordered fields with inline error icons
+```
+
+#### 9. Full checkout (happy path)
+```bash
+# Step 1 — Personal Information
+vibium fill "#field-firstname" "Test"
+vibium fill "#field-lastname" "User"
+vibium fill "#field-email" "testuser@example.com"
+vibium eval 'document.querySelector("#field-psgdpr").click()'
+vibium eval 'document.querySelector("#field-customer_privacy").click()'
+vibium eval 'document.querySelector("button[type=submit]").click()' && vibium sleep 3000
+# Expected: proceeds to Addresses step
+
+# Step 2 — Addresses
+vibium scroll into-view "#field-address1" && vibium sleep 300
+vibium fill "#field-address1" "123 Test Street"
+vibium fill "#field-postcode" "75001"
+vibium fill "#field-city" "Paris"
+vibium eval 'JSON.stringify([...document.querySelector("#field-id_country").options].map(o=>({v:o.value,t:o.text})))'
+# → use numeric value for France
+vibium select "#field-id_country" "8" && vibium sleep 500
+vibium eval 'document.querySelector("form button[type=submit]").click()' && vibium sleep 3000
+# Expected: proceeds to Shipping method step
+
+# Step 3 — Shipping method
+# "Click and collect" (Free) is pre-selected
+vibium find text "Continue to Payment" && vibium click @e1 && vibium sleep 2000
+# Expected: proceeds to Payment step
+
+# Step 4 — Payment
+vibium eval 'document.querySelector("#payment-option-2").click()'  # Cash on Delivery
+vibium eval 'document.querySelector("[name=\"conditions_to_approve[terms-and-conditions]\"]").click()'
+vibium scroll into-view "#payment-confirmation" && vibium sleep 300
+vibium find role button --name "Place Order" && vibium click @e1 && vibium sleep 5000
+vibium url
+# Expected: /order-confirmation or /order-detail
+vibium text
+# Verify: "Your order is confirmed", order number shown, cart cleared
+```
+
+#### Quick smoke test
+```bash
+# Get fresh instance
+vibium go https://demo.prestashop.com/ && vibium sleep 3000
+STORE=$(vibium eval 'document.querySelector("#framelive")?.src' | grep -o 'https://[^/]*')
+vibium go "$STORE/en/" && vibium wait load
+
+# Add item
+vibium find role button --name "Add to cart" && vibium click @e1 && vibium sleep 2000
+vibium find text "Proceed to checkout" && vibium click @e1 && vibium wait load
+
+# Verify cart
+vibium text
+# Verify: Hummingbird t-shirt, €22.94, "1 item", subtotal matches
+
+# Remove item
+vibium find "a.js-remove-from-cart" && vibium click @e1 && vibium sleep 2000
+vibium reload && vibium wait load
+vibium eval 'document.querySelector(".cart-products-count")?.textContent || "0"'
+# Expected: "0"
 ```
 
 ---

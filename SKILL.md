@@ -182,11 +182,58 @@ Iframe IDs change per session. Discover them fresh:
 vibium eval 'JSON.stringify([...document.querySelectorAll("iframe")].map((f,i) => ({i, id: f.id, src: f.src?.substring(0,60)})))'
 ```
 
+### PrestaShop demo — ephemeral subdomains
+`demo.prestashop.com` wraps the actual store in an iframe. Navigate to the inner store directly:
+```
+vibium eval 'document.querySelector("#framelive")?.src'
+vibium go <inner-src-url>
+```
+The inner subdomain (e.g. `gigantic-appliance.demo.prestashop.com`) expires in ~2–5 minutes. If you get "Oops... couldn't find the shop", get a fresh one from the iframe src and restart.
+
+### PrestaShop qty input — Enter to commit
+PrestaShop cart qty inputs require pressing Enter to trigger the update (fill alone does nothing):
+```
+vibium fill "input[name='product-quantity-spin']" "2"
+vibium press Enter "input[name='product-quantity-spin']"
+vibium sleep 2000
+# Verify total updated
+```
+
+### PrestaShop remove — semantic selector required
+`vibium find text "Remove"` returns an outer `<div>` that is not clickable. Target the `<a>` directly:
+```
+vibium find "a.js-remove-from-cart" && vibium click @e1 && vibium sleep 2000
+# Reload to confirm — DOM update is async
+```
+
+### PrestaShop country ID — numeric values
+PrestaShop uses numeric option values for countries, similar to OpenCart. Inspect before selecting:
+```
+vibium eval 'JSON.stringify([...document.querySelector("#field-id_country").options].map(o => ({v:o.value,t:o.text})))'
+# → [{"v":"","t":"-- please choose --"},{"v":"8","t":"France"},{"v":"21","t":"United States"}]
+vibium select "#field-id_country" "8"
+```
+
+### PrestaShop checkout — scroll fields into view before fill
+Address form fields are off-screen and report zero-size until scrolled into view:
+```
+vibium scroll into-view "#field-address1" && vibium sleep 300
+vibium fill "#field-address1" "123 Test Street"
+```
+Submit button also reports zero-size — use eval.click():
+```
+vibium eval 'document.querySelector("form button[type=submit]").click()'
+```
+
+### Cloudflare protection
+`demo.nopcommerce.com` and `demo.opencart.com` are behind Cloudflare Turnstile (managed) and JS challenges respectively. These block headless browsers at the fingerprinting level — no DOM interaction can bypass them. Avoid these sites for automation testing.
+
 ### Cart state persistence
 - **var.parts**: in-memory — never navigate directly to `/cart`. Use the cart badge in the header.
 - **Shopify**: server-side session — direct `/cart` URL is safe.
 - **saucedemo.com**: server-side session — direct `/cart.html` URL is safe.
 - **OpenCart (lambdatest)**: server-side session — direct `/cart` URL is safe.
+- **PrestaShop (demo)**: server-side session per ephemeral subdomain — direct `/cart?action=show` is safe within the same subdomain, but subdomains expire in ~2–5 minutes.
 
 ### Daemon stability
 On long test runs the vibium daemon can drop. If any command fails with "broken pipe" or "i/o timeout":
@@ -253,6 +300,31 @@ vibium daemon stop && sleep 2 && vibium daemon start && sleep 2
   # interact
   vibium click "#react-burger-cross-btn" && vibium sleep 600
   ```
+
+---
+
+### demo.prestashop.com (https://demo.prestashop.com/)
+
+- **Platform:** PrestaShop
+- **Access pattern:** Main URL wraps the store in an iframe. Get the inner URL via `vibium eval 'document.querySelector("#framelive")?.src'`, then `vibium go <inner-url>` to interact directly.
+- **Ephemeral subdomains:** Each instance (e.g. `gigantic-appliance.demo.prestashop.com`) expires in ~2–5 minutes. If the page shows "Oops... couldn't find the shop", get a fresh subdomain from the iframe and restart.
+- **Products:** Hummingbird printed t-shirt (€22.94 / €28.68), Hummingbird printed sweater (€34.46), framed posters. Categories: Clothes, Accessories, Art.
+- **Cart:** Server-side session per subdomain — direct `/cart?action=show` is safe within same instance
+- **Add to cart:** Modal appears with "Continue shopping" and "Proceed to checkout"; cart badge shows "View cart (N products)"
+- **Checkout:** 4-step: Personal Information → Addresses → Shipping method → Payment
+- **Shipping options:** Click and collect (Free), My carrier (€8.40)
+- **Payment options:** Pay by bank wire, Cash on Delivery, Pay by Check (no real payment gateway)
+- **Country dropdown:** Numeric IDs — inspect options: `8` = France, `21` = United States
+- **Address fields:** Off-screen until scrolled into view; use `vibium scroll into-view "#field-address1"` before filling
+- **Submit buttons:** Often zero-size to vibium — use `vibium eval 'document.querySelector("form button[type=submit]").click()'`
+- **Remove from cart:** Target `a.js-remove-from-cart` not the outer div; reload to confirm removal
+- **Qty update:** Fill input + press Enter (fill alone does not trigger update)
+- **Post-order:** No test yet (ephemeral subdomain expired before completion)
+- **Test data:** First `Test`, Last `User`, Email `testuser@example.com`, Address `123 Test Street`, Postcode `75001`, City `Paris`, Country `8` (France)
+- **Known bugs:**
+  - Cart Increase button permanently `disabled` in cart — quantity cannot be increased via UI
+  - Empty cart page (`/cart?action=show`) silently redirects to home with no "cart is empty" message
+  - "Your address is incomplete" error may appear on valid addresses (demo instance data isolation issue)
 
 ---
 
