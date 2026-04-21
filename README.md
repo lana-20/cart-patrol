@@ -1,6 +1,6 @@
 # cart-patrol
 
-E2E test skill for https://var.parts/ — a test storefront for robot parts (Vibium Automation Robots). Uses vibium browser automation.
+Site-agnostic e2e test skill for e-commerce storefronts. Tests navigation, product listing, product detail, cart management, checkout form validation, and payment flows. Built on [vibium](https://www.npmjs.com/package/vibium) browser automation.
 
 ## Installation
 
@@ -14,47 +14,89 @@ npx skills add lana-20/cart-patrol -g
 git clone https://github.com/lana-20/cart-patrol.git ~/.claude/skills/cart-patrol
 ```
 
-## Usage
-
-Once installed, invoke in Claude Code:
-```
-/cart-patrol
-```
-
-Or with a specific flow:
-```
-/cart-patrol smoke
-/cart-patrol checkout
-```
-
-Requires [vibium](https://www.npmjs.com/package/vibium) to be installed:
+Requires [vibium](https://www.npmjs.com/package/vibium):
 ```bash
 npm install -g vibium
 ```
 
-## What the site does
-
-E-commerce shop with 12 products across categories (SWAG, ACCESSORIES, HEAD UNITS, CHASSIS, WIRING, HARDWARE). Full flow: browse → product detail → add to cart → cart management → checkout → payment.
-
-**Important:** Cart state is in-memory only — lost on page reload or direct URL navigation. Always navigate via UI (cart badge/button), never `vibium go https://var.parts/cart` after adding items.
-
-## Known site behavior
-
-- Cart badge shows item count in header nav
-- "Add to Cart" button changes to "In Cart" after adding
-- Toast notification: "Added to cart [product name]"
-- Copy payment link feedback: "Link copied to clipboard" (not "Copied")
-- Decrement quantity to 0 removes item from cart
-- Post-checkout: cart is cleared, confirmation shows "Payment Received!"
-- Checkout form state is retained when going Back to Details from payment page
-
-## Test flows
-
-### 1. Navigation
+## Usage
 
 ```
-vibium go https://var.parts/
-vibium map
+/cart-patrol <url>                  # run all flows on any site
+/cart-patrol <url> <flow>           # run a specific flow
+/cart-patrol <flow>                 # run a flow on the last-discussed site
+/cart-patrol                        # run all flows on the last-discussed site
+```
+
+**Examples:**
+```
+/cart-patrol https://var.parts/
+/cart-patrol https://sauce-demo.myshopify.com/ checkout
+/cart-patrol smoke
+```
+
+**Flow names:** `navigation`, `product`, `cart`, `checkout`, `smoke`, `all`
+
+## Tested sites
+
+| Site | Type | Notes |
+|------|------|-------|
+| [var.parts](https://var.parts/) | Custom React | In-memory cart, custom payment UI |
+| [sauce-demo.myshopify.com](https://sauce-demo.myshopify.com/) | Shopify | Server-side cart, PCI iframe payment |
+
+---
+
+## Cross-site gotchas
+
+### Counting buttons
+`vibium count "button"` has a JSON parse bug on some sites. Use:
+```bash
+vibium eval 'document.querySelectorAll("button").length'
+```
+
+### Hidden quantity inputs (Shopify)
+Shopify carts render duplicate zero-size hidden quantity inputs alongside visible ones. Target visible inputs via eval:
+```bash
+vibium eval 'const inputs = [...document.querySelectorAll("input[name=\"updates[]\"]")].filter(el => el.offsetWidth > 0); inputs[0].value = "2"; inputs[0].dispatchEvent(new Event("change")); "done"'
+```
+
+### PCI payment iframes (Shopify)
+Shopify payment fields live in cross-origin iframes — `vibium fill` is blocked by the browser. Workaround: get iframe bounding rect, click by coordinates, type one character at a time:
+```bash
+vibium eval 'JSON.stringify(document.querySelector("#card-fields-number-<id>")?.getBoundingClientRect())'
+vibium mouse click <center-x> <center-y>
+vibium keys "4"   # type digits one by one — multi-char strings fail
+```
+Iframe IDs contain random suffixes; fetch them fresh each session via:
+```bash
+vibium eval 'JSON.stringify([...document.querySelectorAll("iframe")].map((f,i) => ({i, name: f.name, src: f.src?.substring(0,60)})))'
+```
+
+### Country/state ISO codes (Shopify checkout)
+Shopify's country/state dropdowns use ISO codes internally. `vibium select @e7 "United States"` silently fails. Use the ISO value:
+```bash
+vibium select @e7 "US"    # country
+vibium select @e14 "TX"   # state
+```
+Selecting country triggers a page reload and clears address fields — always refill address, city, and ZIP after `vibium wait load`.
+
+### Cart state persistence
+- **var.parts**: in-memory — never navigate directly to `/cart` after adding items or cart will appear empty. Use UI (header cart badge).
+- **Shopify**: server-side session — direct `/cart` navigation is safe.
+
+---
+
+## Site: var.parts
+
+**URL:** https://var.parts/
+
+**Products:** 12 items across SWAG, ACCESSORIES, HEAD UNITS, CHASSIS, WIRING, HARDWARE
+
+### Test flows
+
+#### 1. Navigation
+```bash
+vibium go https://var.parts/ && vibium map
 # Verify: @e2 [a] "Shop", @e3 [a] "About" present
 vibium click @e3 && vibium wait load
 # Verify: URL = https://var.parts/about, page contains "About VAR Parts"
@@ -62,155 +104,122 @@ vibium click @e2 && vibium wait load
 # Verify: URL = https://var.parts/
 ```
 
-### 2. Product listing
-
-```
+#### 2. Product listing
+```bash
 vibium go https://var.parts/ && vibium map
 # Verify: 12 "Add to Cart" buttons present
-vibium count "button"
+vibium eval 'document.querySelectorAll("button").length'
 # Verify: count >= 12
 ```
 
-### 3. Product detail page
-
-```
+#### 3. Product detail page
+```bash
 vibium go https://var.parts/
 vibium map
 vibium click @e7   # "Vibium Battery Pack" title link
 vibium wait load
 # Verify: URL = https://var.parts/product/12
 # Verify: page contains "Install Time", "Compatibility", "Warranty"
-# Verify: "Add to Cart" button present
-# Verify: "Compatible Components" section present
+# Verify: "Add to Cart" button present, "Compatible Components" section present
 ```
 
-### 4. Add to cart from listing
-
-```
-vibium go https://var.parts/
-vibium map
+#### 4. Add to cart from listing
+```bash
+vibium go https://var.parts/ && vibium map
 vibium click @e8   # first "Add to Cart"
 vibium wait text "Added to cart"
 vibium diff map
-# Verify: button changed to "In Cart"
-# Verify: cart badge count = 1
+# Verify: button changed to "In Cart", cart badge count = 1
 ```
 
-### 5. Add to cart from product page
-
-```
-vibium go https://var.parts/product/12
-vibium map
+#### 5. Add to cart from product page
+```bash
+vibium go https://var.parts/product/12 && vibium map
 vibium click @e8   # "Add to Cart" on product page
 vibium wait text "Added to cart"
 vibium diff map
 # Verify: button changed to "In Cart"
 ```
 
-### 6. Cart management
-
-```
-# Start: add two items first (see flow 4), then navigate via cart badge
+#### 6. Cart management
+```bash
+# Start: add two items (flow 4), then navigate via cart badge — never via direct URL
 vibium map
 vibium click @e6   # cart badge (e.g. "2")
 vibium wait load
-# Verify: URL = https://var.parts/cart
-# Verify: item count in heading matches
+# Verify: URL = https://var.parts/cart, item count in heading matches
 
-# Quantity increment
 vibium map
 vibium click @e7   # "+" button for first item
 vibium text
 # Verify: quantity and subtotal updated
 
-# Quantity decrement
 vibium click @e6   # "-" button for first item
 vibium text
 # Verify: quantity decremented
 
-# Decrement to 0 removes item
-vibium click @e6
+vibium click @e6   # decrement to 0 removes item
 vibium text
 # Verify: item removed from cart
 
-# Clear Cart
 vibium map
 vibium click @e17  # "Clear Cart" button
 vibium text
 # Verify: "Your cart is empty"
 ```
 
-### 7. Empty cart state
-
-```
+#### 7. Empty cart state
+```bash
 vibium go https://var.parts/cart
 # Verify: "Your cart is empty" (direct navigation with no session)
-
 vibium go https://var.parts/checkout
 # Verify: "Nothing to check out"
 ```
 
-### 8. Checkout form validation
-
-```
-# Add item, navigate via UI to checkout
-# Then submit with empty required fields:
-vibium find button "Proceed to Payment"
+#### 8. Checkout form validation
+```bash
+# Add item, navigate via UI to checkout, then submit empty:
+vibium find text "Proceed to Payment"
 vibium click @e1
 vibium text
 # Verify: "Missing address" and "Unit designation and service bay are required."
 ```
 
-### 9. Full checkout — Lunar shipping (happy path)
+#### 9. Full checkout — Lunar shipping (happy path)
+```bash
+vibium go https://var.parts/ && vibium map
+vibium click @e8 && vibium wait text "Added to cart"
 
-```
-# 1. Add item
-vibium go https://var.parts/
-vibium map
-vibium click @e8
-vibium wait text "Added to cart"
-
-# 2. Go to cart
 vibium map
 vibium click @e6   # cart badge
 vibium wait load
 
-# 3. Proceed to checkout
 vibium map
-vibium click @e11  # "Proceed to Checkout" button
+vibium click @e11  # "Proceed to Checkout"
 vibium wait load
 
-# 4. Fill form (Lunar shipping is default/FREE)
 vibium map
 vibium fill @e7 "VAR-402"    # Unit Designation (required)
 vibium fill @e8 "Bay 14-C"   # Service Bay (required)
-# @e9 Sector, @e10 Station are optional
 
-# 5. Proceed to payment
 vibium click @e14  # "Proceed to Payment"
-vibium wait load
-vibium text
+vibium wait load && vibium text
 # Verify: "Complete Payment", "Pay Here" tab, "Other Device" tab
-# Verify: order total = ⚡89.99 (Battery Pack) or item price
-# Verify: "Ship to: VAR-402" and "Bay: Bay 14-C"
+# Verify: "Ship to: VAR-402", "Bay: Bay 14-C"
 
-# 6. Pay
 vibium map
 vibium click @e10  # "Pay Now"
 vibium wait text "Payment Received!"
-vibium text
-# Verify: "Payment Received!" and "parts will be dispatched to Bay 14-C, VAR-402"
+# Verify: "parts will be dispatched to Bay 14-C, VAR-402"
 
-# 7. Return to shop
 vibium map
 vibium click @e7   # "Back to Shop"
 vibium wait load
-# Verify: URL = https://var.parts/, cart badge gone (cart cleared)
+# Verify: URL = https://var.parts/, cart badge gone
 ```
 
-### 10. Checkout — Interplanetary shipping
-
-```
+#### 10. Checkout — Interplanetary shipping
+```bash
 # After filling form, before clicking Proceed to Payment:
 vibium map
 vibium click @e13   # Interplanetary Express radio
@@ -218,10 +227,8 @@ vibium text
 # Verify: Shipping = ⚡149.99, Total = item price + 149.99
 ```
 
-### 11. Payment — Other Device tab
-
-```
-# After reaching payment page:
+#### 11. Payment — Other Device tab
+```bash
 vibium map
 vibium click @e8   # "Other Device" tab
 vibium diff map
@@ -234,73 +241,181 @@ vibium text
 # Verify: "Link copied to clipboard"
 ```
 
-### 12. Back to Details from payment
-
-```
+#### 12. Back to Details / Back to Cart
+```bash
 vibium map
 vibium click @e12  # "Back to Details"
 vibium diff map
 # Verify: checkout form inputs reappear
-```
 
-### 13. Back to Cart from checkout
-
-```
 vibium map
 vibium click @e6   # "Back to Cart"
 vibium wait load
 # Verify: URL = https://var.parts/cart, items still in cart
 ```
 
-## Quick smoke test (all flows in sequence)
-
+#### Quick smoke test
 ```bash
-# Navigate + About
 vibium go https://var.parts/ && vibium map
 vibium click @e3 && vibium wait load && vibium url
 # Expected: https://var.parts/about
 
-# Product detail
 vibium go https://var.parts/product/12 && vibium wait load && vibium url
 # Expected: https://var.parts/product/12
 
-# Add to cart
-vibium go https://var.parts/
-vibium map
+vibium go https://var.parts/ && vibium map
 vibium click @e8 && vibium wait text "Added to cart"
 vibium click @e11 && vibium wait text "Added to cart"
 
-# Cart
 vibium map
-vibium click @e7  # cart badge showing "2"
+vibium click @e7   # cart badge "2"
 vibium wait load && vibium text
 # Expected: "2 items in your cart", total = ⚡239.98
 
-# Checkout
 vibium map
 vibium click @e11 && vibium wait load
 vibium map
 vibium fill @e7 "VAR-999" && vibium fill @e8 "Bay 99-Z"
 vibium click @e14 && vibium wait load
-
-# Pay
 vibium map
 vibium click @e10 && vibium wait text "Payment Received!"
-# Expected: confirmation page
-
-# Return to shop
 vibium map
 vibium click @e7 && vibium wait load && vibium url
 # Expected: https://var.parts/
 ```
 
-## Args
+---
 
-Pass a specific flow name to run just that flow:
-- `navigation` — test nav links only
-- `product` — test product listing and detail
-- `cart` — test cart management
-- `checkout` — test full checkout + payment
-- `smoke` — abbreviated happy-path run
+## Site: sauce-demo.myshopify.com
 
-Default (no args): run all flows.
+**URL:** https://sauce-demo.myshopify.com/  
+**Catalog:** https://sauce-demo.myshopify.com/collections/all
+
+**Products:** 7 total (2 sold out — Brown Shades, White sandals), currency GBP
+
+### Test flows
+
+#### 1. Navigation
+```bash
+vibium go https://sauce-demo.myshopify.com/ && vibium map
+# Verify: Home, Catalog, Blog, About Us, Wish list, Refer a friend nav links present
+vibium click @e11 && vibium wait load && vibium url
+# Expected: /collections/all
+
+vibium map
+vibium click @e12 && vibium wait load && vibium url
+# Expected: /blogs/news
+
+vibium map
+vibium click @e13 && vibium wait load && vibium url
+# Expected: /pages/about-us
+```
+
+#### 2. Product listing
+```bash
+vibium go https://sauce-demo.myshopify.com/collections/all && vibium text
+# Verify: Black heels £45, Bronze sandals £39.99, Brown Shades £20 (SOLD OUT),
+#         Grey jacket £55, Noir jacket £60, Striped top £50, White sandals £25 (SOLD OUT)
+```
+
+#### 3. Product detail
+```bash
+vibium go https://sauce-demo.myshopify.com/products/grey-jacket && vibium wait load
+# Verify: URL = /products/grey-jacket
+vibium map
+# Verify: variant select (@e23), Add to Cart submit button (@e24) present
+vibium text
+# Verify: name "Grey jacket", price "£55.00"
+```
+
+#### 4. Add to cart
+```bash
+vibium go https://sauce-demo.myshopify.com/products/grey-jacket && vibium map
+vibium find "input[name='add']"
+vibium click @e1 && vibium wait load
+vibium text "a#minicart, [class*='cart']"
+# Verify: My Cart count incremented to 1
+```
+
+#### 5. Multi-variant add to cart (Noir jacket)
+```bash
+vibium go https://sauce-demo.myshopify.com/products/noir-jacket && vibium map
+# @e23 = size select (S/M/L), @e24 = color select (Blue/Red), @e25 = Add to Cart
+# Variant selects appear BEFORE the submit button — click @e25, not @e24
+vibium click @e25 && vibium wait load
+# Verify: cart count incremented
+```
+
+#### 6. Cart page
+```bash
+vibium go https://sauce-demo.myshopify.com/cart && vibium text
+# Verify: items listed with correct prices and total
+```
+
+#### 7. Quantity update
+```bash
+# Quantity inputs may include hidden zero-size clones — use eval to find visible ones:
+vibium eval 'const inputs = [...document.querySelectorAll("input[name=\"updates[]\"]")].filter(el => el.offsetWidth > 0); inputs[0].value = "2"; inputs[0].dispatchEvent(new Event("change")); "done"'
+vibium find "input[name='update']" && vibium click @e1 && vibium wait load
+vibium text
+# Verify: quantity = 2, subtotal doubled, order total updated
+```
+
+#### 8. Remove item
+```bash
+vibium map
+# Find "x" remove links
+vibium click @e25   # first item remove
+vibium wait load && vibium text
+# Verify: item removed, cart count decremented, total updated
+```
+
+#### 9. Checkout form validation
+```bash
+# Add item, go to cart, click checkout:
+vibium find "input[name='checkout']" && vibium click @e1 && vibium wait load
+# Click Pay now without filling anything:
+vibium find "button[type='submit']" && vibium click @e1 && vibium sleep 2000
+vibium text
+# Verify: "Enter an address", "Enter a city", "Enter a ZIP / postal code",
+#         "Enter a card number", "Enter a valid expiration date"
+```
+
+#### 10. Full checkout (happy path)
+```bash
+# 1. Add item and go to checkout
+vibium go https://sauce-demo.myshopify.com/products/grey-jacket && vibium map
+vibium find "input[name='add']" && vibium click @e1 && vibium wait load
+vibium go https://sauce-demo.myshopify.com/cart
+vibium find "input[name='checkout']" && vibium click @e1 && vibium wait load
+
+# 2. Fill delivery — country MUST use ISO code, not display name
+vibium fill @e5 "test@example.com"
+vibium select @e7 "US" && vibium wait load   # triggers reload, clears address fields
+vibium select @e14 "TX"
+vibium fill @e9 "Tester"
+vibium fill @e11 "123 Test Street"
+vibium fill @e13 "Austin"
+vibium fill @e15 "78701"
+vibium fill @e16 "5125550100"
+
+# 3. Wait for shipping methods to load (requires complete address)
+vibium sleep 3000 && vibium text
+# Verify: "International Shipping" option appears with price
+
+# 4. Fill payment fields — PCI iframes require mouse clicks + single-char key presses
+# Get iframe positions:
+vibium eval 'JSON.stringify({num: document.querySelector("[id^=card-fields-number]")?.getBoundingClientRect(), exp: document.querySelector("[id^=card-fields-expiry]")?.getBoundingClientRect(), cvv: document.querySelector("[id^=card-fields-verification_value]")?.getBoundingClientRect(), name: document.querySelector("[id^=card-fields-name]")?.getBoundingClientRect()})'
+# Then click each iframe center and type one digit at a time:
+# Card: mouse click <num-center-x> <num-center-y> → keys "1"
+# Expiry: mouse click <exp-center-x> <exp-center-y> → keys "1","2","3","0"  (= 12/30)
+# CVV: mouse click <cvv-center-x> <cvv-center-y> → keys "1","2","3"
+# Name: mouse click <name-center-x> <name-center-y> → keys "T","e","s","t","e","r"
+
+# 5. Submit
+vibium find "button[type='submit']" && vibium click @e1 && vibium sleep 4000
+vibium url
+# Verify: URL contains /thank-you
+vibium text
+# Verify: "Thank you!", "Your order is confirmed", confirmation number, order summary
+```
