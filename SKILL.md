@@ -281,6 +281,13 @@ Remove link is an `<a>` with `href` containing `remove=productid:hash`:
 vibium find "a[href*='remove=']" && vibium click @e1 && vibium wait load
 ```
 
+### Hibernating backends (Azure / Heroku)
+Demo sites hosted on Azure App Service or Heroku free tier hibernate after inactivity. If the product listing loads with zero items and no error:
+```
+vibium sleep 5000 && vibium reload && vibium wait load --timeout 20000
+```
+Wait up to 30 seconds total. If products still don't appear after one reload, log as infrastructure issue (not an app bug) and skip the site.
+
 ### Daemon stability
 On long test runs the vibium daemon can drop. If any command fails with "broken pipe" or "i/o timeout":
 ```
@@ -439,3 +446,43 @@ vibium daemon stop && sleep 2 && vibium daemon start && sleep 2
 - **Success page security:** Direct navigation to success URL redirects to homepage (correctly secured — no order context leak)
 - **No known bugs**
 - **Test data:** First Name `Test`, Last Name `User`, Email `guest_test@example.com`, Tel `12025550100`, Address `123 Test Street`, City `Austin`, Post Code `78701`, Country `223` (US), Zone `3669` (Texas)
+
+---
+
+### AcademyBugs (https://academybugs.com/)
+
+- **Platform:** Custom PHP/HTML, bug-hunting practice site — 25 planted bugs
+- **Purpose:** Bug discovery, not real e-commerce. All cart behaviors may be intentionally broken.
+- **Setup:** Dismiss the tutorial modal (× button in top-right of overlay) AND the cookie banner ("Accept cookies") before interacting — both obscure elements and block clicks.
+- **Products:** Apparel and accessories; prices in USD
+- **Cart flow:** Works partially; product detail page has a planted layout bug — adding to cart from product detail causes the cart dropdown to render with broken/overlapping layout
+- **Sort/filter:** Sort dropdown on listing page is non-functional (intentional bug — no reorder occurs). "View 12/24" filter buttons are unresponsive.
+- **CSS text-transform:** Nav items and some buttons are rendered uppercase via CSS but have mixed-case DOM text — use actual DOM text with `vibium find text`, not the uppercase display text
+- **Known bugs (cart-relevant):**
+  - Sort dropdown has no effect — products remain in original order regardless of selection
+  - View count filter (12/24) does not change number of visible products
+  - Add to Cart from product detail page breaks cart dropdown layout
+- **Note:** Not suitable for full checkout flow testing — cart bugs are intentional and checkout is not a test target here
+
+---
+
+### BookCart (https://bookcart.azurewebsites.net/)
+
+- **Platform:** Angular SPA, Azure App Service backend
+- **Hibernation:** Azure backend hibernates after inactivity. On first load, product list may be empty. Wait 5–10s and reload once — backend wakes within ~30s. If products still don't appear, skip; log as infrastructure issue.
+- **Products:** Books across multiple categories; prices in USD; displayed after backend wakes
+- **Cart:** Server-side session — direct cart URL safe once backend is awake
+- **Login:** `admin` / `admin` (default credentials documented on site's About page); silent failure on wrong credentials — no error message shown
+- **Registration:** Completes with no email confirmation and no success message — only redirect
+- **Add to cart:** Requires login; if not logged in, add-to-cart may silently fail or redirect to login
+- **Known bugs:**
+  - Login with invalid credentials shows no error feedback — silent failure
+  - Registration provides no confirmation to the user
+  - Product API call fails silently on cold start — no loading state or error shown to user
+
+---
+
+### Magento (https://magento.softwaretestingboard.com/)
+
+- **Status: DOWN as of 2026-04-22** — Cloudflare 526 SSL certificate error. Site is unreachable.
+- Do not attempt to test. Log as infrastructure failure and skip.
