@@ -47,12 +47,15 @@ npm install -g vibium
 | [sauce-demo.myshopify.com](https://sauce-demo.myshopify.com/) | Shopify | Server-side | PCI iframes | 2 sold-out products |
 | [saucedemo.com](https://www.saucedemo.com) | Custom React | Server-side | Fake (auto) | Login-gated demo, no qty controls |
 | [ecommerce-playground.lambdatest.io](https://ecommerce-playground.lambdatest.io/) | OpenCart | Server-side | Cash on Delivery | Many products have broken option selects |
-| [demo.prestashop.com](https://demo.prestashop.com/) | PrestaShop | Server-side (per subdomain) | Bank wire / COD / Check | Store in iframe; subdomains expire in ~2–5 min |
+| [demo.prestashop.com](https://demo.prestashop.com/) | PrestaShop | Server-side (per subdomain) | Bank wire / COD / Check | Store in iframe; subdomains expire in ~2–3 min; nav link clicks deadlock daemon — use direct URL |
 | [coffee-cart.app](https://coffee-cart.app/) | Custom Vue SPA | In-memory | None (email link) | Products are divs; right-click dialog; promo popup on 3rd item |
 | [automationteststore.com](https://automationteststore.com/) | AbanteCart | Server-side | Cash on Delivery | Add to Cart is `<a>` not button; qty input has hash-based name |
 | [academybugs.com](https://academybugs.com/) | Custom PHP | Partial (buggy) | None | 25 planted bugs; cart layout broken by design; dismiss modal + cookie banner first |
 | [bookcart.azurewebsites.net](https://bookcart.azurewebsites.net/) | Angular + Azure | Server-side | None (demo) | Backend hibernates — reload once and wait 30s; silent login failure |
 | [magento.softwaretestingboard.com](https://magento.softwaretestingboard.com/) | Magento | — | — | **DOWN** — Cloudflare 526 SSL error as of 2026-04-22 |
+| [shop.polymer-project.org](https://shop.polymer-project.org/) | Polymer Web Components | Server-side | None (demo) | All UI in shadow DOM — `vibium map` returns nothing; use eval+coords for all interaction |
+| [practicesoftwaretesting.com](https://practicesoftwaretesting.com/) | Angular | Server-side | None (demo) | Add to cart works without login; Login is `input[type=submit]`; shared account may be locked; Angular async delay after filters — sleep 1500 |
+| [qa-practice.razvanvancea.ro](https://qa-practice.razvanvancea.ro/) | Custom HTML/JS | In-memory (lost on reload) | None (demo) | Login: `admin@admin.com` / `admin123`; ADD TO CART is CSS uppercase — use map refs; checkout DOM-toggle (form parent display:none → block) |
 
 ---
 
@@ -64,6 +67,21 @@ Demo sites on Azure App Service or Heroku free tier hibernate after inactivity. 
 vibium sleep 5000 && vibium reload && vibium wait load --timeout 20000
 ```
 Wait up to 30 seconds. If products still don't appear after one reload, skip the site and log as infrastructure issue.
+
+### Web Components / shadow DOM sites
+`vibium map`, `vibium click`, `vibium fill`, and `vibium find` are all blocked by shadow DOM boundaries. Sites like **Polymer Shop** render their entire UI inside custom elements. Use `eval + shadowRoot` to traverse and `getBoundingClientRect()` + `vibium mouse click x y` to interact:
+```bash
+# Find element and get coordinates
+vibium eval 'JSON.stringify(document.querySelector("shop-app").shadowRoot.querySelector("shop-button")?.getBoundingClientRect())'
+# → {"x":720,"y":734,"width":186,"height":36}
+vibium mouse click 813 752
+# Read state
+vibium eval 'document.querySelector("shop-app").shadowRoot.querySelector("shop-cart")?.shadowRoot?.querySelector(".subtotal")?.textContent?.trim()'
+```
+Navigate between pages via `vibium go <direct-url>` — shadow DOM links are not clickable through vibium.
+
+### CSS text-transform — button text mismatch
+Some sites render buttons as uppercase via CSS while DOM text is mixed-case. `vibium find text "ADD TO CART"` silently fails — use `vibium map` refs instead. Affects: **AcademyBugs**, **QA Practice**.
 
 ### Counting buttons
 `vibium count "button"` has a JSON parse error on some sites. Use eval:

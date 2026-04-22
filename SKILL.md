@@ -228,6 +228,13 @@ vibium eval 'document.querySelector("form button[type=submit]").click()'
 ### Cloudflare protection
 `demo.nopcommerce.com` and `demo.opencart.com` are behind Cloudflare Turnstile (managed) and JS challenges respectively. These block headless browsers at the fingerprinting level — no DOM interaction can bypass them. Avoid these sites for automation testing.
 
+### CSS text-transform — button text mismatch
+Some sites render button text as uppercase via CSS (`text-transform: uppercase`) while the DOM contains mixed-case text. `vibium find text "ADD TO CART"` silently returns no match because the DOM contains `"Add to Cart"`:
+```
+vibium find text "ADD TO CART"   # → element not found (CSS, not DOM)
+```
+Solution: always use `vibium map` refs for buttons on affected sites. Affected sites: **AcademyBugs**, **QA Practice** (`qa-practice.razvanvancea.ro`).
+
 ### SPA in-memory carts — never use vibium go for cart navigation
 Some SPAs store cart state in memory (Vue/React component state). A `vibium go` to the cart URL causes a full page reload that wipes the cart. Always navigate via UI links:
 ```
@@ -249,12 +256,36 @@ vibium sleep 500
 vibium find role button --name "Yes" && vibium click @e1   # or "No" to dismiss
 ```
 
+### Web Components shadow DOM — Polymer Shop
+`vibium map` returns "No interactive elements found" on any Polymer Shop page. All UI lives in nested `<shop-app>` custom element shadow DOMs. Pattern for every interaction:
+```
+# 1. Find element via shadow DOM traversal
+vibium eval 'JSON.stringify(document.querySelector("shop-app").shadowRoot.querySelector("shop-detail")?.shadowRoot?.querySelector("shop-button")?.getBoundingClientRect())'
+# → {"x":720,"y":734,"width":186,"height":36,...}
+
+# 2. Click via coordinates
+vibium mouse click 813 752
+
+# 3. Read state via eval
+vibium eval 'document.querySelector("shop-app").shadowRoot.querySelector("shop-cart")?.shadowRoot?.querySelector(".subtotal")?.textContent?.trim()'
+```
+
+Shadow DOM component map:
+- `shop-app > shop-list` — product listing
+- `shop-app > shop-detail` — product detail (has `shop-button`, size/qty selects)
+- `shop-app > shop-cart` — cart (has `shop-cart-item`, total, checkout button)
+- `shop-app > shop-checkout` — checkout form (accountEmail, accountPhone, ship*, cc*)
+- `shop-app > shop-cart-button` — header cart badge
+
+Navigation links are reachable via direct URL — use `vibium go` to navigate between pages. Cart is server-side.
+
 ### Cart state persistence
 - **var.parts**: in-memory — never navigate directly to `/cart`. Use the cart badge in the header.
 - **coffee-cart.app**: in-memory — use `vibium find "a[href='/cart']" && vibium click @e1`, not `vibium go`.
 - **Shopify**: server-side session — direct `/cart` URL is safe.
 - **saucedemo.com**: server-side session — direct `/cart.html` URL is safe.
 - **OpenCart (lambdatest)**: server-side session — direct `/cart` URL is safe.
+- **Polymer Shop**: server-side session — direct `/cart` URL is safe.
 - **AbanteCart (automationteststore)**: server-side session — direct `/index.php?rt=checkout/cart` safe.
 - **PrestaShop (demo)**: server-side session per ephemeral subdomain — direct `/cart?action=show` is safe within the same subdomain, but subdomains expire in ~2–5 minutes.
 
@@ -360,7 +391,13 @@ vibium daemon stop && sleep 2 && vibium daemon start && sleep 2
 
 - **Platform:** PrestaShop
 - **Access pattern:** Main URL wraps the store in an iframe. Get the inner URL via `vibium eval 'document.querySelector("#framelive")?.src'`, then `vibium go <inner-url>` to interact directly.
-- **Ephemeral subdomains:** Each instance (e.g. `gigantic-appliance.demo.prestashop.com`) expires in ~2–5 minutes. If the page shows "Oops... couldn't find the shop", get a fresh subdomain from the iframe and restart.
+- **Ephemeral subdomains:** Each instance expires in ~2–3 minutes (confirmed shorter than the documented 5 min). If the page shows "Oops... couldn't find the shop", get a fresh subdomain from the iframe src and restart.
+- **Nav link daemon deadlock:** Clicking category nav links (Clothes, Accessories, Art) inside the inner store triggers full page navigation that the vibium daemon socket cannot follow — command hangs. Use direct URL navigation instead:
+  ```bash
+  vibium go "$STORE/en/3-clothes"      # not: vibium click @eN "Clothes"
+  vibium go "$STORE/en/6-accessories"
+  vibium go "$STORE/en/9-art"
+  ```
 - **Products:** Hummingbird printed t-shirt (€22.94 / €28.68), Hummingbird printed sweater (€34.46), framed posters. Categories: Clothes, Accessories, Art.
 - **Cart:** Server-side session per subdomain — direct `/cart?action=show` is safe within same instance
 - **Add to cart:** Modal appears with "Continue shopping" and "Proceed to checkout"; cart badge shows "View cart (N products)"
@@ -486,3 +523,135 @@ vibium daemon stop && sleep 2 && vibium daemon start && sleep 2
 
 - **Status: DOWN as of 2026-04-22** — Cloudflare 526 SSL certificate error. Site is unreachable.
 - Do not attempt to test. Log as infrastructure failure and skip.
+
+---
+
+### Polymer Shop (https://shop.polymer-project.org/)
+
+- **Platform:** Polymer Web Components (v1/v2 era)
+- **Critical limitation:** `vibium map` returns "No interactive elements found" on every page — all UI is inside nested shadow DOMs (`shop-app > shop-list/detail/cart/checkout`). Normal vibium commands (click, fill, find) cannot target anything.
+- **Interaction pattern:** Use `eval + shadowRoot traversal` to find elements → `getBoundingClientRect()` for coordinates → `vibium mouse click x y`
+- **Products:** 4 categories (Men's/Ladies Outerwear, Men's/Ladies T-Shirts); ~16 items per category; prices in USD
+- **Cart:** Server-side session — direct `/cart` URL is safe
+- **Add to cart:** Click `shop-button` inside `shop-detail` shadow DOM; confirm via `shop-cart-item` count in cart shadow DOM
+- **Checkout fields:** accountEmail (required), accountPhone (required), shipAddress/City/State/Zip (required), ccName/ccNumber/ccCVV (required); setBilling checkbox for separate billing address
+- **Checkout validation:** 9 fields show `input:invalid` on empty submit — HTML5 native validation
+- **No real payment processing** — demo only
+- **Navigation:** Use `vibium go` with direct URLs; shadow DOM links are reachable
+- **Known shadow DOM component map:**
+  - `shop-app.shadowRoot.querySelector("shop-list")` — product listing
+  - `shop-app.shadowRoot.querySelector("shop-detail")` — product detail + Add to Cart
+  - `shop-app.shadowRoot.querySelector("shop-cart")` — cart + total + checkout button
+  - `shop-app.shadowRoot.querySelector("shop-checkout")` — checkout form
+
+---
+
+### practicesoftwaretesting.com (https://practicesoftwaretesting.com/)
+
+- **Platform:** Angular SPA (Toolshop — hand tools, power tools, rentals)
+- **Products:** Hand tools, power tools, other, special tools, rentals; paginated (5 pages); brand and category filters
+- **Cart:** Server-side session — add to cart works without login; login required only at checkout step 2
+- **Search:** Works — `vibium find placeholder "Search"` + fill + `vibium find role button --name "Search"` + click
+- **Filters:** Category and brand checkboxes work — `vibium find "input[name=brand_id]"` + `vibium check @e1`
+- **Login:** `customer@practicesoftwaretesting.com` / `welcome01` — **may be locked** (shared account locked by previous sessions); admin credentials not publicly documented
+- **Login submit:** `input[type=submit]` not `<button>` — `vibium find role button --name "Login"` fails with timeout; use `vibium eval 'document.querySelector("input[type=submit][value=Login]").click()'`
+- **Checkout wizard:** 4 steps — Cart → Sign in → Billing Address → Payment; step indicators clearly labeled
+- **API:** REST API + Swagger at https://api.practicesoftwaretesting.com/api/documentation
+- **Angular async delay:** After applying category/brand filters, DOM updates are async — add `vibium sleep 1500` before reading results
+- **Known issues:**
+  - Shared test account locks after too many failed login attempts — no self-service unlock
+  - Search for "pliers" returns "Leather toolbelt" — possible keyword/tag match, not strict relevance
+
+### Test flows
+
+#### Smoke test
+```bash
+# Browse products
+vibium go https://practicesoftwaretesting.com/ && vibium wait load
+vibium text
+# Verify: products with names and prices visible
+
+# Add to cart without login
+vibium map
+# Find a product link — e.g. @e5 [a] "Slip Joint Pliers"
+vibium click @e5 && vibium wait load
+vibium find text "Add to cart" && vibium click @e1 && vibium sleep 1000
+vibium eval 'document.querySelector(".navbar [class*=cart]")?.textContent?.trim()'
+# Verify: cart badge incremented
+
+# Search
+vibium go https://practicesoftwaretesting.com/ && vibium wait load
+vibium find placeholder "Search" && vibium fill @e1 "hammer"
+vibium find role button --name "Search" && vibium click @e1 && vibium sleep 1500
+vibium text
+# Verify: results contain hammer-related products
+```
+
+#### Category filter
+```bash
+vibium go https://practicesoftwaretesting.com/ && vibium wait load
+vibium find "input[name=by_category]" && vibium check @e1 && vibium sleep 1500
+vibium text
+# Verify: product list narrowed to selected category
+```
+
+#### Login (if account not locked)
+```bash
+vibium go https://practicesoftwaretesting.com/auth/login && vibium wait load
+vibium fill "#email" "customer@practicesoftwaretesting.com"
+vibium fill "#password" "welcome01"
+vibium eval 'document.querySelector("input[type=submit][value=Login]").click()' && vibium sleep 2000
+vibium url
+# Expected: / (redirected to home on success)
+# If account locked: error shown on login page — no self-service unlock available
+```
+
+---
+
+### qa-practice.razvanvancea.ro (https://qa-practice.razvanvancea.ro/)
+
+- **Platform:** Custom HTML/JS, multi-section QA practice site (moved from qa-practice.netlify.app)
+- **Login:** `admin@admin.com` / `admin123` (credentials shown as placeholder text on login page)
+- **Session:** NOT persistent — page reload wipes cart and logs out (localStorage/in-memory)
+- **Products:** 200 items (cosmetics), paginated — 10 per page, 20 pages
+- **Add to cart:** Buttons use CSS `text-transform: uppercase` — DOM text is `"ADD TO CART"`. `vibium find text` fails. Use `vibium map` refs: after login on page 1, product buttons are `@e27`–`@e36`.
+- **Cart:** Shown as a table at top of page; updates in-place when items added
+- **Checkout:** "PROCEED TO CHECKOUT" button toggles DOM — hides product section, reveals Shipping Details form (Phone, Street, City, Country). Form parent starts as `display:none`.
+- **Post-order:** Inline confirmation on same page — no separate URL, no order number. Message: "Congrats! Your order of $X.XX has been registered and will be shipped to [address]."
+- **Cart cleared on checkout:** After clicking PROCEED TO CHECKOUT, cart visually resets to $0 — expected (products hidden, form shown), not a bug.
+
+### Test flows
+
+#### Smoke test
+```bash
+# Login
+vibium go https://qa-practice.razvanvancea.ro/auth_ecommerce.html && vibium wait load
+vibium map
+# @e25 = email, @e26 = password, @e27 = submit
+vibium fill @e25 "admin@admin.com" && vibium fill @e26 "admin123" && vibium click @e27
+vibium wait load
+# Verify: Log Out link visible, Shopping Cart heading, product grid loaded
+
+# Add to cart (use map refs — CSS uppercase breaks find text)
+vibium map
+# @e27 = first ADD TO CART button
+vibium click @e27 && vibium sleep 500
+vibium eval 'document.querySelector(".table")?.textContent?.trim()?.slice(0,80)'
+# Verify: product name appears in cart table with price
+
+# Proceed to checkout
+vibium map
+# @e26 = PROCEED TO CHECKOUT button
+vibium click @e26 && vibium sleep 500
+vibium map --selector "form"
+# Verify: Phone, Street, City, Country, Submit Order fields appear
+
+# Fill and submit order
+vibium fill @e1 "1234567890"  # phone
+vibium fill @e2 "123 Main St"  # street
+vibium fill @e3 "New York"     # city
+vibium select @e4 "United States of America"
+vibium click @e5 && vibium sleep 500
+vibium text
+# Verify: "Congrats! Your order of $..."
+```
