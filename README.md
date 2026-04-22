@@ -50,10 +50,20 @@ npm install -g vibium
 | [demo.prestashop.com](https://demo.prestashop.com/) | PrestaShop | Server-side (per subdomain) | Bank wire / COD / Check | Store in iframe; subdomains expire in ~2–5 min |
 | [coffee-cart.app](https://coffee-cart.app/) | Custom Vue SPA | In-memory | None (email link) | Products are divs; right-click dialog; promo popup on 3rd item |
 | [automationteststore.com](https://automationteststore.com/) | AbanteCart | Server-side | Cash on Delivery | Add to Cart is `<a>` not button; qty input has hash-based name |
+| [academybugs.com](https://academybugs.com/) | Custom PHP | Partial (buggy) | None | 25 planted bugs; cart layout broken by design; dismiss modal + cookie banner first |
+| [bookcart.azurewebsites.net](https://bookcart.azurewebsites.net/) | Angular + Azure | Server-side | None (demo) | Backend hibernates — reload once and wait 30s; silent login failure |
+| [magento.softwaretestingboard.com](https://magento.softwaretestingboard.com/) | Magento | — | — | **DOWN** — Cloudflare 526 SSL error as of 2026-04-22 |
 
 ---
 
 ## Cross-site gotchas
+
+### Hibernating backends (Azure / Heroku)
+Demo sites on Azure App Service or Heroku free tier hibernate after inactivity. If the product list loads empty with no error:
+```bash
+vibium sleep 5000 && vibium reload && vibium wait load --timeout 20000
+```
+Wait up to 30 seconds. If products still don't appear after one reload, skip the site and log as infrastructure issue.
 
 ### Counting buttons
 `vibium count "button"` has a JSON parse error on some sites. Use eval:
