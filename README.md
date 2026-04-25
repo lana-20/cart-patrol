@@ -47,7 +47,7 @@ npm install -g vibium
 | [sauce-demo.myshopify.com](https://sauce-demo.myshopify.com/) | Shopify | Server-side | PCI iframes | 2 sold-out products |
 | [saucedemo.com](https://www.saucedemo.com) | Custom React | Server-side | Fake (auto) | Login-gated demo, no qty controls |
 | [ecommerce-playground.lambdatest.io](https://ecommerce-playground.lambdatest.io/) | OpenCart | Server-side | Cash on Delivery | Many products have broken option selects |
-| [demo.prestashop.com](https://demo.prestashop.com/) | PrestaShop | Server-side (per subdomain) | Bank wire / COD / Check | Store in iframe; subdomains expire in ~2–3 min; nav link clicks deadlock daemon — use direct URL |
+| [demo.prestashop.com](https://demo.prestashop.com/) | PrestaShop | Server-side (per subdomain) | Bank wire / COD / Check | Store in iframe; subdomains expire in ~2 min; `vibium go` to subdomain pages deadlocks daemon (B3) — use `eval location.href`; **add-to-cart button permanently disabled** after PS JS init — cart untestable |
 | [coffee-cart.app](https://coffee-cart.app/) | Custom Vue SPA | In-memory | None (email link) | Products are divs; right-click dialog; promo popup on 3rd item |
 | [automationteststore.com](https://automationteststore.com/) | AbanteCart | Server-side | Cash on Delivery | Add to Cart is `<a>` not button; qty input has hash-based name |
 | [academybugs.com](https://academybugs.com/) | Custom PHP | Partial (buggy) | None | 25 planted bugs; cart layout broken by design; dismiss modal + cookie banner first |
@@ -182,14 +182,18 @@ vibium eval 'JSON.stringify([...document.querySelectorAll("iframe")].map((f,i) =
 ```
 
 ### PrestaShop demo — ephemeral subdomains and iframe wrapper
-`demo.prestashop.com` wraps the actual store in a `#framelive` iframe. Navigate to the inner URL directly to interact with it:
+`demo.prestashop.com` wraps the actual store in a `#framelive` iframe. Navigate to the homepage with `vibium go`, then use JS navigation for all subsequent page transitions — `vibium go` to subdomain pages deadlocks the daemon (B3 pattern):
 ```bash
-vibium go https://demo.prestashop.com/ && vibium sleep 3000
+vibium go https://demo.prestashop.com/ && vibium wait load && vibium sleep 5000
 vibium eval 'document.querySelector("#framelive")?.src'
 # → https://gigantic-appliance.demo.prestashop.com/en/...
-vibium go "https://gigantic-appliance.demo.prestashop.com/en/"
+vibium go "https://gigantic-appliance.demo.prestashop.com/en/" && vibium wait load  # homepage only
+
+# All further navigation — use eval, not vibium go:
+vibium eval 'location.href = "https://gigantic-appliance.demo.prestashop.com/1-1-hummingbird-printed-t-shirt.html"'
+vibium wait load --timeout 10000
 ```
-The inner subdomain expires in ~2–5 minutes. If you hit "Oops... couldn't find the shop", fetch a new subdomain from the iframe src and restart. Subdomains cannot be reused after expiry.
+The inner subdomain expires in ~2 min of active testing. If you hit "Oops... couldn't find the shop", fetch a new subdomain and restart. Subdomains cannot be reused after expiry.
 
 ### PrestaShop qty update — Enter required
 Filling the qty input alone does nothing. Always follow with Enter:
@@ -284,7 +288,7 @@ If a site shows "Performing security verification" with a spinning loader or "Ve
 - **saucedemo.com**: Server-side session — direct `/cart.html` URL is safe.
 - **OpenCart (lambdatest)**: Server-side session — direct cart URL is safe.
 - **AbanteCart (automationteststore)**: Server-side session — direct `/index.php?rt=checkout/cart` is safe.
-- **PrestaShop (demo)**: Server-side session per ephemeral subdomain — direct `/cart?action=show` works within the same instance, but the subdomain expires in ~2–5 minutes.
+- **PrestaShop (demo)**: Server-side session per ephemeral subdomain — direct `/cart?action=show` works within the same instance, but the subdomain expires in ~2 min of active testing.
 
 ### Daemon recovery
 On long sessions, the vibium daemon can drop with "broken pipe" or "i/o timeout". Restart and re-navigate:
@@ -954,18 +958,21 @@ vibium text
 
 **URL:** https://demo.prestashop.com/ (inner store: `*.demo.prestashop.com/en/`)  
 **Platform:** PrestaShop  
-**Products:** Hummingbird printed t-shirt (€22.94 sale / €28.68), Hummingbird sweater (€34.46), framed posters. Categories: Clothes, Accessories, Art.  
-**Cart:** Server-side session per ephemeral subdomain — expires in ~2–5 minutes  
+**Products:** Hummingbird printed t-shirt (€22.94 sale / €28.68), Brown bear sweater (€34.46), framed posters. Categories: Clothes, Accessories, Art.  
+**Product URLs:** `/{subdomain}/1-1-hummingbird-printed-t-shirt.html`, `/2-9-brown-bear-printed-sweater.html`  
+**Cart:** Server-side session per ephemeral subdomain — expires in ~2 min of active testing  
 **Checkout:** 4-step: Personal Information → Addresses → Shipping method → Payment
 
 **Known bugs:**
-- Cart quantity Increase button is permanently `disabled` — cannot increase qty from cart view
-- Empty cart page silently redirects to home; no "cart is empty" message shown
+- **Add to cart button permanently disabled** — `[data-button-action=add-to-cart]` becomes `disabled=true` after PrestaShop JS initializes. Affects product detail pages AND homepage product cards. Click via map ref succeeds (no error) but AJAX fails silently and cart stays at 0. Direct POST to `/cart` returns HTML, not JSON. Cart and checkout flows are untestable.
+- Cart qty Increase button (`+`) in cart view is also permanently `disabled`
+- Empty cart checkout (`/en/order`) redirects to `/cart?action=show` with "There are no more items in your cart" — expected behavior, but checkout form validation is untestable due to add-to-cart bug above
 - "Your address is incomplete" error can appear even with a valid complete address (demo instance isolation issue)
 
 **Automation quirks:**
-- Store is inside a `#framelive` iframe — always navigate directly to the inner subdomain URL
-- Subdomains expire mid-session; get a fresh one from the iframe src if the page 404s
+- Store is inside a `#framelive` iframe — navigate to homepage with `vibium go`, then use `eval 'location.href = "..."'` + `vibium wait load` for all subsequent navigation (`vibium go` to subdomain pages deadlocks daemon — B3)
+- Subdomains expire in ~2 min; get a fresh one from the iframe src if the page shows "couldn't find the shop"
+- Product detail variant selectors: Size = `#input_1_1` (`name="group[1]"`, values `1`–`4`); Color = `input[name="group[2]"]` (val=`8` White, val=`11` Black)
 - Address form fields are off-screen and report zero-size — scroll into view before filling
 - Submit buttons also zero-size — use `eval 'form button[type=submit].click()'`
 - Remove link is inside a wrapper div; target `a.js-remove-from-cart` directly
@@ -976,49 +983,52 @@ vibium text
 
 #### 1. Get a live instance
 ```bash
-vibium go https://demo.prestashop.com/ && vibium sleep 3000
+vibium go https://demo.prestashop.com/ && vibium wait load && vibium sleep 5000
 vibium eval 'document.querySelector("#framelive")?.src'
 # Copy the inner URL, e.g. https://gigantic-appliance.demo.prestashop.com/en/
 vibium go "https://gigantic-appliance.demo.prestashop.com/en/" && vibium wait load
+# IMPORTANT: all subsequent navigation must use eval location.href (vibium go deadlocks — B3)
 ```
 
 #### 2. Navigation
 ```bash
-vibium find text "Clothes" && vibium click @e1 && vibium wait load && vibium url
+# Use eval location.href — vibium click on nav links and vibium go both deadlock (B3)
+STORE="https://gigantic-appliance.demo.prestashop.com"
+vibium eval "location.href = '${STORE}/en/3-clothes'" && vibium wait load && vibium url
 # Expected: /3-clothes
-vibium back && vibium wait load
-vibium find text "Accessories" && vibium click @e1 && vibium wait load && vibium url
+vibium eval "location.href = '${STORE}/en/6-accessories'" && vibium wait load && vibium url
 # Expected: /6-accessories
-vibium back && vibium wait load
-vibium find text "Art" && vibium click @e1 && vibium wait load && vibium url
+vibium eval "location.href = '${STORE}/en/9-art'" && vibium wait load && vibium url
 # Expected: /9-art
 ```
 
 #### 3. Product listing
 ```bash
-vibium find text "Clothes" && vibium click @e1 && vibium wait load
+STORE="https://gigantic-appliance.demo.prestashop.com"
+vibium eval "location.href = '${STORE}/en/3-clothes'" && vibium wait load
 vibium text
 # Verify: "Hummingbird printed t-shirt", "Hummingbird printed sweater", prices visible
 vibium map --selector ".products"
-# Verify: "Add to cart" buttons present for each product
+# Verify: "Add to cart" buttons present for each product (NOTE: buttons may show as disabled — see bug)
 ```
 
 #### 4. Product detail
 ```bash
-vibium find text "Clothes" && vibium click @e1 && vibium wait load
-vibium find role link --name "View product Hummingbird printed t-shirt" && vibium click @e1 && vibium wait load
+STORE="https://gigantic-appliance.demo.prestashop.com"
+vibium eval "location.href = '${STORE}/1-1-hummingbird-printed-t-shirt.html'" && vibium wait load
 vibium text
 # Verify: name, sale price (€22.94), regular price (€28.68), -20% badge
-# Verify: Size selector (S/M/L/XL), Color selector (White/Black), Add to cart present
+# Verify: Size selector (S/M/L/XL via #input_1_1), Color radios (White val=8 / Black val=11)
 ```
 
 #### 5. Add to cart
 ```bash
-vibium find role button --name "Add to cart" && vibium click @e1 && vibium sleep 2000
-# Verify: modal appeared with "Continue shopping" and "Proceed to checkout"
-# Verify: cart badge now shows "View cart (1 products)"
-vibium find text "Proceed to checkout" && vibium click @e1 && vibium wait load && vibium url
-# Expected: /cart?action=show
+# ⚠ BUG: Add to cart button is permanently disabled after PS JS init.
+# [data-button-action=add-to-cart] becomes disabled=true on page load.
+# Click via ref succeeds but AJAX fails silently — cart stays at 0.
+# This flow is currently untestable on the live demo instance.
+vibium eval "document.querySelector('[data-button-action=add-to-cart]').disabled"
+# → true (confirms bug)
 ```
 
 #### 6. Cart management
@@ -1037,19 +1047,21 @@ vibium reload && vibium wait load
 
 #### 7. Empty cart
 ```bash
-vibium go "<subdomain>/cart?action=show" && vibium wait load
-# Actual: silently redirects to home with no message (BUG)
-vibium go "<subdomain>/order" && vibium wait load && vibium url
-# Verify: redirected away from checkout (not allowed with empty cart)
+STORE="https://gigantic-appliance.demo.prestashop.com"
+vibium eval "location.href = '${STORE}/cart?action=show'" && vibium wait load
+vibium text
+# Expected: "There are no more items in your cart" (cart page shown correctly)
+vibium eval "location.href = '${STORE}/en/order'" && vibium wait load && vibium url
+# Expected: redirects to /cart?action=show (checkout correctly blocked with empty cart)
 ```
 
 #### 8. Checkout form validation
 ```bash
-# Add item, reach checkout step 1 (Personal Information)
-vibium eval 'document.querySelector("button[type=submit]").click()' && vibium sleep 1500
-vibium eval 'JSON.stringify([...document.querySelectorAll(":invalid")].map(el => ({name: el.name, msg: el.validationMessage})))'
-# Verify: firstname, lastname, email, psgdpr, customer_privacy all invalid
-# Screenshot shows red-bordered fields with inline error icons
+# ⚠ BLOCKED: Add to cart is disabled — cart cannot be populated, checkout unreachable.
+# If add-to-cart is fixed in a future instance, use:
+# vibium eval 'document.querySelector("button[type=submit]").click()' && vibium sleep 1500
+# vibium eval 'JSON.stringify([...document.querySelectorAll(":invalid")].map(el => ({name: el.name, msg: el.validationMessage})))'
+# Expected: firstname, lastname, email, psgdpr, customer_privacy all invalid
 ```
 
 #### 9. Full checkout (happy path)
@@ -1092,24 +1104,23 @@ vibium text
 
 #### Quick smoke test
 ```bash
-# Get fresh instance
-vibium go https://demo.prestashop.com/ && vibium sleep 3000
+# Get fresh instance (use eval for all navigation after homepage — vibium go deadlocks B3)
+vibium go https://demo.prestashop.com/ && vibium wait load && vibium sleep 5000
 STORE=$(vibium eval 'document.querySelector("#framelive")?.src' | grep -o 'https://[^/]*')
 vibium go "$STORE/en/" && vibium wait load
 
-# Add item
-vibium find role button --name "Add to cart" && vibium click @e1 && vibium sleep 2000
-vibium find text "Proceed to checkout" && vibium click @e1 && vibium wait load
+# Verify structure
+vibium map
+# Expected: 80 interactive elements; Clothes/Accessories/Art nav; 4 featured products
 
-# Verify cart
-vibium text
-# Verify: Hummingbird t-shirt, €22.94, "1 item", subtotal matches
+# Check add-to-cart button state (known bug)
+vibium eval 'document.querySelector("[data-button-action=add-to-cart]")?.disabled'
+# → true = bug still present; false = may be fixed, proceed to test flow 5
 
-# Remove item
-vibium find "a.js-remove-from-cart" && vibium click @e1 && vibium sleep 2000
-vibium reload && vibium wait load
-vibium eval 'document.querySelector(".cart-products-count")?.textContent || "0"'
-# Expected: "0"
+# Navigate to product detail (use eval, not click)
+vibium eval "location.href = '${STORE}/1-1-hummingbird-printed-t-shirt.html'" && vibium wait load
+vibium eval 'JSON.stringify({name: document.querySelector("h1")?.textContent?.trim(), price: document.querySelector(".product__price")?.textContent?.trim()})'
+# Verify: name "Hummingbird printed t-shirt", price "€22.94"
 ```
 
 ---

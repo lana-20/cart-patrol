@@ -183,12 +183,19 @@ vibium eval 'JSON.stringify([...document.querySelectorAll("iframe")].map((f,i) =
 ```
 
 ### PrestaShop demo — ephemeral subdomains
-`demo.prestashop.com` wraps the actual store in an iframe. Navigate to the inner store directly:
+`demo.prestashop.com` wraps the actual store in an iframe. Get the inner URL after a 5s wait, then navigate via JS — NOT `vibium go`:
 ```
+vibium go https://demo.prestashop.com/ && vibium wait load && vibium sleep 5000
 vibium eval 'document.querySelector("#framelive")?.src'
-vibium go <inner-src-url>
+# → https://{subdomain}.demo.prestashop.com/en/...
+vibium go https://{subdomain}.demo.prestashop.com/en/   # homepage only — see note below
 ```
-The inner subdomain (e.g. `gigantic-appliance.demo.prestashop.com`) expires in ~2–5 minutes. If you get "Oops... couldn't find the shop", get a fresh one from the iframe src and restart.
+**`vibium go` deadlocks on subdomain pages** (B3 pattern — daemon socket i/o timeout). Use JS navigation for all in-store page transitions:
+```
+vibium eval 'location.href = "https://{subdomain}.demo.prestashop.com/1-1-hummingbird-printed-t-shirt.html"'
+vibium wait load --timeout 10000
+```
+The inner subdomain expires in ~2 min of active testing. If you get "Oops... couldn't find the shop", get a fresh subdomain and restart.
 
 ### PrestaShop qty input — Enter to commit
 PrestaShop cart qty inputs require pressing Enter to trigger the update (fill alone does nothing):
@@ -287,7 +294,7 @@ Navigation links are reachable via direct URL — use `vibium go` to navigate be
 - **OpenCart (lambdatest)**: server-side session — direct `/cart` URL is safe.
 - **Polymer Shop**: server-side session — direct `/cart` URL is safe.
 - **AbanteCart (automationteststore)**: server-side session — direct `/index.php?rt=checkout/cart` safe.
-- **PrestaShop (demo)**: server-side session per ephemeral subdomain — direct `/cart?action=show` is safe within the same subdomain, but subdomains expire in ~2–5 minutes.
+- **PrestaShop (demo)**: server-side session per ephemeral subdomain — direct `/cart?action=show` is safe within the same subdomain, but subdomains expire in ~2 min of active testing.
 
 ### AbanteCart — Add to Cart is an anchor, not a button
 AbanteCart uses `<a class="cart">` for Add to Cart, not `<button>`. `vibium find role button` will miss it:
@@ -390,15 +397,18 @@ vibium daemon stop && sleep 2 && vibium daemon start && sleep 2
 ### demo.prestashop.com (https://demo.prestashop.com/)
 
 - **Platform:** PrestaShop
-- **Access pattern:** Main URL wraps the store in an iframe. Get the inner URL via `vibium eval 'document.querySelector("#framelive")?.src'`, then `vibium go <inner-url>` to interact directly.
-- **Ephemeral subdomains:** Each instance expires in ~2–3 minutes (confirmed shorter than the documented 5 min). If the page shows "Oops... couldn't find the shop", get a fresh subdomain from the iframe src and restart.
-- **Nav link daemon deadlock:** Clicking category nav links (Clothes, Accessories, Art) inside the inner store triggers full page navigation that the vibium daemon socket cannot follow — command hangs. Use direct URL navigation instead:
+- **Access pattern:** Main URL wraps the store in an iframe. Get the inner URL via `vibium eval 'document.querySelector("#framelive")?.src'` after a 5s wait. Navigate to the homepage with `vibium go` — but use `eval 'location.href = "..."'` + `vibium wait load` for all subsequent in-store navigation.
+- **Ephemeral subdomains:** Each instance expires in ~2 min of active testing. If the page shows "Oops... couldn't find the shop", get a fresh subdomain and restart.
+- **`vibium go` deadlocks on subdomain pages (B3):** Any `vibium go` to a subdomain page causes daemon socket i/o timeout. Only `vibium go` to the homepage on first load is safe. All further navigation must use JS:
   ```bash
-  vibium go "$STORE/en/3-clothes"      # not: vibium click @eN "Clothes"
-  vibium go "$STORE/en/6-accessories"
-  vibium go "$STORE/en/9-art"
+  vibium eval 'location.href = "$STORE/en/3-clothes"'  # not: vibium go or vibium click nav
+  vibium wait load --timeout 10000
+  vibium eval 'location.href = "$STORE/1-1-hummingbird-printed-t-shirt.html"'
+  vibium wait load --timeout 10000
   ```
-- **Products:** Hummingbird printed t-shirt (€22.94 / €28.68), Hummingbird printed sweater (€34.46), framed posters. Categories: Clothes, Accessories, Art.
+- **Products:** Hummingbird printed t-shirt (€22.94 sale / €28.68 regular), Brown bear sweater (€34.46), framed posters. Categories: Clothes, Accessories, Art.
+- **Product URL pattern:** `/{subdomain}/1-1-hummingbird-printed-t-shirt.html`, `/2-9-brown-bear-printed-sweater.html`
+- **Product detail variant selectors:** Size = `#input_1_1` (`name="group[1]"`, values `1`–`4` for S/M/L/XL); Color = `input[name="group[2]"]` (val=`8` White, val=`11` Black)
 - **Cart:** Server-side session per subdomain — direct `/cart?action=show` is safe within same instance
 - **Add to cart:** Modal appears with "Continue shopping" and "Proceed to checkout"; cart badge shows "View cart (N products)"
 - **Checkout:** 4-step: Personal Information → Addresses → Shipping method → Payment
@@ -412,8 +422,9 @@ vibium daemon stop && sleep 2 && vibium daemon start && sleep 2
 - **Post-order:** No test yet (ephemeral subdomain expired before completion)
 - **Test data:** First `Test`, Last `User`, Email `testuser@example.com`, Address `123 Test Street`, Postcode `75001`, City `Paris`, Country `8` (France)
 - **Known bugs:**
-  - Cart Increase button permanently `disabled` in cart — quantity cannot be increased via UI
-  - Empty cart page (`/cart?action=show`) silently redirects to home with no "cart is empty" message
+  - **Add to cart button permanently disabled** — `[data-button-action=add-to-cart]` becomes `disabled=true` after PrestaShop JS initializes on page load. Affects product detail pages and homepage product cards. Click via map ref succeeds without error but AJAX fails silently and cart stays at 0. Direct AJAX POST to `/cart` returns HTML error page, not JSON. Checkout is unreachable because cart cannot be populated.
+  - Cart qty increase button (`+`) in cart is also permanently `disabled`
+  - Empty cart checkout (`/en/order`) redirects to `/cart?action=show` showing "There are no more items in your cart" — correct behavior, expected
   - "Your address is incomplete" error may appear on valid addresses (demo instance data isolation issue)
 
 ---
