@@ -626,6 +626,7 @@ vibium url
 - **Session:** NOT persistent — page reload wipes cart and logs out (localStorage/in-memory)
 - **Products:** 200 items (cosmetics), paginated — 10 per page, 20 pages
 - **Add to cart:** Buttons use CSS `text-transform: uppercase` — DOM text is `"ADD TO CART"`. `vibium find text` fails. Use `vibium map` refs: after login on page 1, product buttons are `@e27`–`@e36`.
+- **Dialogs:** Some button clicks trigger native `alert`/`confirm` dialogs — pre-stub before clicking: `vibium eval 'window.alert = () => {}; window.confirm = () => true'`
 - **Cart:** Shown as a table at top of page; updates in-place when items added
 - **Checkout:** "PROCEED TO CHECKOUT" button toggles DOM — hides product section, reveals Shipping Details form (Phone, Street, City, Country). Form parent starts as `display:none`.
 - **Post-order:** Inline confirmation on same page — no separate URL, no order number. Message: "Congrats! Your order of $X.XX has been registered and will be shipped to [address]."
@@ -635,6 +636,9 @@ vibium url
 
 #### Smoke test
 ```bash
+# Pre-stub dialogs before any clicks — some buttons trigger alert/confirm
+vibium eval 'window.alert = () => {}; window.confirm = () => true'
+
 # Login
 vibium go https://qa-practice.razvanvancea.ro/auth_ecommerce.html && vibium wait load
 vibium map

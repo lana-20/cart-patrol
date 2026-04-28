@@ -55,7 +55,7 @@ npm install -g vibium
 | [magento.softwaretestingboard.com](https://magento.softwaretestingboard.com/) | Magento | — | — | **DOWN** — Cloudflare 526 SSL error as of 2026-04-22 |
 | [shop.polymer-project.org](https://shop.polymer-project.org/) | Polymer Web Components | Server-side | None (demo) | All UI in shadow DOM — `vibium map` returns nothing; use eval+coords for all interaction |
 | [practicesoftwaretesting.com](https://practicesoftwaretesting.com/) | Angular | Server-side | None (demo) | Add to cart works without login; Login is `input[type=submit]`; shared account may be locked; Angular async delay after filters — sleep 1500 |
-| [qa-practice.razvanvancea.ro](https://qa-practice.razvanvancea.ro/) | Custom HTML/JS | In-memory (lost on reload) | None (demo) | Login: `admin@admin.com` / `admin123`; ADD TO CART is CSS uppercase — use map refs; checkout DOM-toggle (form parent display:none → block) |
+| [qa-practice.razvanvancea.ro](https://qa-practice.razvanvancea.ro/) | Custom HTML/JS | In-memory (lost on reload) | None (demo) | Login: `admin@admin.com` / `admin123`; ADD TO CART is CSS uppercase — use map refs; pre-stub `alert`/`confirm` via eval before clicking buttons that trigger dialogs; checkout DOM-toggle (form parent display:none → block) |
 
 ---
 
@@ -284,6 +284,7 @@ If a site shows "Performing security verification" with a spinning loader or "Ve
 ### Cart state persistence
 - **var.parts**: In-memory — cart is lost on any direct URL navigation. Always use the header cart badge.
 - **coffee-cart.app**: In-memory — use `vibium find "a[href='/cart']" && vibium click @e1`, never `vibium go`.
+- **qa-practice.razvanvancea.ro**: In-memory — entire session (cart + login) is lost on page reload. Never reload mid-flow.
 - **Shopify**: Server-side session — direct `/cart` URL is safe regardless of navigation path.
 - **saucedemo.com**: Server-side session — direct `/cart.html` URL is safe.
 - **OpenCart (lambdatest)**: Server-side session — direct cart URL is safe.
