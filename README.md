@@ -1,5 +1,6 @@
-# cart-patrol
+<img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/93c1ce7d-68c9-4720-a021-be7f09133052" />
 
+# cart-patrol
 Site-agnostic e2e test skill for e-commerce storefronts. Tests navigation, product listing, product detail, cart management, checkout form validation, and payment flows. Built on [vibium](https://www.npmjs.com/package/vibium) browser automation.
 
 ## Installation
